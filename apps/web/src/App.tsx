@@ -16,6 +16,7 @@ const HOTKEYS: Record<string, string> = {
   v: "/dashboard",
   n: "/create",
   w: "/tracking",
+  l: "/leaderboards",
 };
 
 function Nav({ to, hotkey, label, end }: { to: string; hotkey: string; label: string; end?: boolean }) {
@@ -225,6 +226,7 @@ export default function App() {
 
         <div className="navsec">Intel</div>
         <Nav to="/tracking" hotkey="w" label="Wallet tracking" />
+        <Nav to="/leaderboards" hotkey="l" label="Leaderboards" />
 
         <div className="spacer" />
         <div className="acctbox">

@@ -17,6 +17,7 @@ import {
   type Position,
   type TokenInfo,
   type TokenPoolStats,
+  type Trade,
   type Vault,
 } from "@coffer/shared";
 import { api } from "../lib/api";
@@ -45,6 +46,8 @@ export function Terminal() {
 
   const [mint, setMint] = useState(DEFAULT_MINT);
   const [tf, setTf] = useState<Tf>("5m");
+  const [denom, setDenom] = useState<"usd" | "mcap">("usd");
+  const [supplyUi, setSupplyUi] = useState<number | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("1");
   const [busy, setBusy] = useState(false);
@@ -68,6 +71,7 @@ export function Terminal() {
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [vaultId, setVaultId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [vaultTrades, setVaultTrades] = useState<Trade[]>([]);
 
   // order form
   const [orderKind, setOrderKind] = useState<OrderKind>("take_profit");
@@ -90,8 +94,24 @@ export function Terminal() {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartApi = useRef<IChartApi | null>(null);
   const seriesApi = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const rawCandles = useRef<{ t: number; o: number; h: number; l: number; c: number }[]>([]);
   const [pool, setPool] = useState<string | null>(null);
   const [candleState, setCandleState] = useState<"loading" | "live" | "none">("loading");
+
+  // supply powers the Price/MCap denomination toggle — memecoin traders think in mcap
+  useEffect(() => {
+    let alive = true;
+    setSupplyUi(null);
+    fetch(`/api/security/${mint}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { supplyUi?: number | null } | null) => {
+        if (alive) setSupplyUi(s?.supplyUi ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [mint]);
 
   useEffect(() => {
     api.vaults().then((vs) => {
@@ -108,6 +128,7 @@ export function Terminal() {
       api.vault(vaultId).then((d) => {
         if (!alive) return;
         setPositions(d.positions);
+        setVaultTrades(d.trades);
         setVaults((vs) => vs.map((v) => (v.id === d.vault.id ? d.vault : v)));
       }).catch(() => {});
     load();
@@ -151,6 +172,8 @@ export function Terminal() {
     };
   }, []);
 
+  const [candleVer, setCandleVer] = useState(0);
+
   useEffect(() => {
     let alive = true;
     setCandleState("loading");
@@ -158,24 +181,11 @@ export function Terminal() {
       api
         .ohlcv(mint, tf)
         .then((r) => {
-          if (!alive || !seriesApi.current || !chartApi.current) return;
+          if (!alive) return;
           setPool(r.pool);
-          if (r.candles.length === 0) {
-            seriesApi.current.setData([]);
-            setCandleState("none");
-            return;
-          }
-          seriesApi.current.setData(
-            r.candles.map((c) => ({
-              time: c.t as UTCTimestamp,
-              open: c.o,
-              high: c.h,
-              low: c.l,
-              close: c.c,
-            })),
-          );
-          chartApi.current.timeScale().fitContent();
-          setCandleState("live");
+          rawCandles.current = r.candles;
+          setCandleVer((v) => v + 1);
+          setCandleState(r.candles.length === 0 ? "none" : "live");
         })
         .catch(() => alive && setCandleState("none"));
     load();
@@ -185,6 +195,44 @@ export function Terminal() {
       clearInterval(iv);
     };
   }, [mint, tf]);
+
+  // render pipeline: raw candles × denomination scale + vault trade markers
+  useEffect(() => {
+    const series = seriesApi.current;
+    const chart = chartApi.current;
+    if (!series || !chart) return;
+    const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
+    const scale = mcapMode ? supplyUi : 1;
+    series.applyOptions({
+      priceFormat: mcapMode
+        ? { type: "volume" }
+        : { type: "price", precision: 9, minMove: 0.000000001 },
+    });
+    series.setData(
+      rawCandles.current.map((c) => ({
+        time: c.t as UTCTimestamp,
+        open: c.o * scale,
+        high: c.h * scale,
+        low: c.l * scale,
+        close: c.c * scale,
+      })),
+    );
+    // your vault's fills painted on the candles — B below, S above
+    const first = rawCandles.current[0]?.t ?? 0;
+    series.setMarkers(
+      vaultTrades
+        .filter((t) => t.mint === mint && t.ts >= first)
+        .sort((a, b) => a.ts - b.ts)
+        .map((t) => ({
+          time: t.ts as UTCTimestamp,
+          position: t.side === "buy" ? ("belowBar" as const) : ("aboveBar" as const),
+          color: t.side === "buy" ? "#2fd980" : "#ff4f58",
+          shape: t.side === "buy" ? ("arrowUp" as const) : ("arrowDown" as const),
+          text: t.side === "buy" ? "B" : "S",
+        })),
+    );
+    chart.timeScale().fitContent();
+  }, [candleVer, denom, supplyUi, vaultTrades, mint]);
 
   // detect order fills → toast
   const prevOrders = useRef<Map<string, string>>(new Map());
@@ -330,6 +378,18 @@ export function Terminal() {
                 <Skeleton h={26} w={280} />
               )}
               <span style={{ flex: 1 }} />
+              <div className="viewtoggle" title={supplyUi ? "Chart denomination" : "MCap needs supply — loading"}>
+                <button className={denom === "usd" ? "on" : ""} onClick={() => setDenom("usd")}>
+                  Price
+                </button>
+                <button
+                  className={denom === "mcap" ? "on" : ""}
+                  disabled={!supplyUi}
+                  onClick={() => setDenom("mcap")}
+                >
+                  MCap
+                </button>
+              </div>
               <div className="chipsrow">
                 {TFS.map((t) => (
                   <button key={t} className={`chip ${tf === t ? "on" : ""}`} onClick={() => setTf(t)}>
