@@ -1,0 +1,96 @@
+// ── live pool trade tape via GeckoTerminal (free, keyless) ─────────
+// Reuses the ohlcv service's top-pool resolution, then pulls the pool's
+// recent trades. Response shape verified against the live API:
+// attributes = { block_number, block_timestamp (ISO), tx_hash,
+// tx_from_address, from_token_amount, to_token_amount,
+// price_from_in_usd, price_to_in_usd, kind ("buy"|"sell"),
+// volume_in_usd, from_token_address, to_token_address }.
+// Side detection prefers matching the mint against the transfer legs
+// (to_ side = buy, from_ side = sell) — `kind` is relative to the
+// pool's base token, the legs are unambiguous. Cached 15s per mint;
+// failures degrade to {trades: []}, never a 500.
+
+import type { PoolTrade, TradeSide } from "@coffer/shared";
+import { cacheGet, cacheSet } from "../cache.js";
+import { gtFetch } from "./gtBudget.js";
+import { topPool } from "./ohlcv.js";
+
+const GT_BASE = "https://api.geckoterminal.com/api/v2";
+const FETCH_TIMEOUT_MS = 8_000;
+const TRADES_TTL_MS = 15_000;
+const MAX_TRADES = 40;
+
+interface GtTradeRow {
+  attributes?: {
+    block_timestamp?: string;
+    kind?: string;
+    tx_hash?: string;
+    tx_from_address?: string;
+    from_token_amount?: string;
+    to_token_amount?: string;
+    price_from_in_usd?: string;
+    price_to_in_usd?: string;
+    volume_in_usd?: string;
+    from_token_address?: string;
+    to_token_address?: string;
+  };
+}
+
+function mapTrade(mint: string, row: GtTradeRow): PoolTrade | undefined {
+  const a = row?.attributes;
+  if (!a) return undefined;
+
+  let side: TradeSide;
+  if (a.to_token_address === mint) side = "buy";
+  else if (a.from_token_address === mint) side = "sell";
+  else if (a.kind === "buy" || a.kind === "sell") side = a.kind;
+  else return undefined;
+
+  const ts = Math.floor(Date.parse(a.block_timestamp ?? "") / 1000);
+  const priceUsd = Number(side === "buy" ? a.price_to_in_usd : a.price_from_in_usd);
+  const amountToken = Number(side === "buy" ? a.to_token_amount : a.from_token_amount);
+  const amountUsd = Number(a.volume_in_usd);
+  if (!Number.isFinite(ts) || !Number.isFinite(priceUsd) || !Number.isFinite(amountToken)) {
+    return undefined;
+  }
+  return {
+    ts,
+    side,
+    priceUsd,
+    amountUsd: Number.isFinite(amountUsd) ? amountUsd : 0,
+    amountToken,
+    txSig: a.tx_hash ?? "",
+    wallet: a.tx_from_address ?? "",
+  };
+}
+
+export interface PoolTradesResult {
+  trades: PoolTrade[];
+}
+
+/** Latest ~40 trades in the mint's deepest pool, newest first. */
+export async function getPoolTrades(mint: string): Promise<PoolTradesResult> {
+  const key = `gt:trades:${mint}`;
+  const cached = cacheGet<PoolTradesResult>(key);
+  if (cached !== undefined) return cached;
+
+  const pool = await topPool(mint);
+  if (!pool) return cacheSet(key, { trades: [] }, TRADES_TTL_MS);
+
+  let trades: PoolTrade[] = [];
+  try {
+    const res = await gtFetch(
+      `${GT_BASE}/networks/solana/pools/${encodeURIComponent(pool)}/trades?trade_volume_in_usd_greater_than=0`,
+      { priority: "normal", timeoutMs: FETCH_TIMEOUT_MS },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = (await res.json()) as { data?: GtTradeRow[] };
+    trades = (body?.data ?? [])
+      .map((row) => mapTrade(mint, row))
+      .filter((t): t is PoolTrade => t !== undefined)
+      .slice(0, MAX_TRADES);
+  } catch {
+    trades = [];
+  }
+  return cacheSet(key, { trades }, TRADES_TTL_MS);
+}

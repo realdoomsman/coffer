@@ -1,0 +1,125 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { fmtPct, fmtSol, type Vault } from "@coffer/shared";
+import { api, type VaultDetail } from "../lib/api";
+import { EquityChart, Stat, StatusPill, TypePill } from "../components/bits";
+import { usePageTitle } from "../lib/hooks";
+import { TradeTape } from "../components/TradeTape";
+
+/**
+ * Trader side. P0 shows the demo trader's first vault; real auth maps the
+ * signed-in user to their vaults.
+ */
+export function TraderDashboard() {
+  usePageTitle("My vault");
+  const [vaults, setVaults] = useState<Vault[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<VaultDetail | null>(null);
+
+  useEffect(() => {
+    api.vaults().then((vs) => {
+      setVaults(vs);
+      if (vs.length > 0) setSelected(vs[0]!.id);
+    }).catch(() => setVaults([]));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setDetail(null);
+    api.vault(selected).then(setDetail).catch(() => {});
+  }, [selected]);
+
+  const pendingOut = useMemo(
+    () => detail?.pendingWithdrawals.reduce((s, w) => s + w.valueAtRequestSol, 0) ?? 0,
+    [detail],
+  );
+
+  if (!vaults) return <div className="empty">Loading…</div>;
+  if (vaults.length === 0)
+    return (
+      <div className="empty">
+        You don't run a vault yet — <Link to="/create">create one</Link>. Zero SOL required.
+      </div>
+    );
+
+  const vault = detail?.vault;
+
+  return (
+    <>
+      <div className="pagehead">
+        <div>
+          <h1>My vault</h1>
+          <div className="sub">The trader side: what you manage, what's pending against you, where your fees stand.</div>
+        </div>
+        <div className="chipsrow">
+          {vaults.slice(0, 6).map((v) => (
+            <button key={v.id} className={`chip ${selected === v.id ? "on" : ""}`} onClick={() => setSelected(v.id)}>
+              {v.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!vault ? (
+        <div className="empty">Loading vault…</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
+            <TypePill type={vault.type} />
+            <StatusPill status={vault.status} />
+            <span className="dimtx mono" style={{ fontSize: 12 }}>
+              perf fee {(vault.perfFeeBps / 100).toFixed(0)}% · window {vault.redeemWindowHours}h
+            </span>
+            <div style={{ flex: 1 }} />
+            <Link to={`/vault/${vault.id}`} className="btn ghost sm">Public page ↗</Link>
+            <Link to="/terminal" className="btn primary sm">Open terminal</Link>
+          </div>
+
+          <div className="statrow" style={{ marginBottom: 16 }}>
+            <Stat k="TVL" v={`${fmtSol(vault.tvlSol, 0)} ◎`} d={`${vault.stats.depositorCount} depositors`} />
+            <Stat k="30d return" v={fmtPct(vault.stats.pnlPct30d)} tone={vault.stats.pnlPct30d >= 0 ? "pos" : "neg"} />
+            <Stat k="Your stake" v={`${fmtSol(vault.managerStakeSol)} ◎`} d={`${vault.managerStakePct.toFixed(1)}% of TVL`} />
+            <Stat k="SOL buffer" v={`${fmtSol(vault.solBufferSol)} ◎`} d="covers instant exits" />
+            <Stat
+              k="Pending withdrawals"
+              v={`${fmtSol(pendingOut)} ◎`}
+              d={pendingOut > vault.solBufferSol ? "unwind needed" : "buffer covers it"}
+              tone={pendingOut > vault.solBufferSol ? "neg" : undefined}
+            />
+          </div>
+
+          {pendingOut > vault.solBufferSol && (
+            <div className="callout red" style={{ marginBottom: 16 }}>
+              Withdrawal requests exceed the SOL buffer — unwind{" "}
+              <span className="num">{fmtSol(pendingOut - vault.solBufferSol)} ◎</span> of positions before
+              the window closes, or the program will settle from forced position marks.
+            </div>
+          )}
+
+          <div className="grid2">
+            <div className="panel panel-pad">
+              <div className="sectiontitle" style={{ marginTop: 0 }}>Equity</div>
+              <EquityChart points={vault.equityCurve} height={180} />
+            </div>
+            <div className="panel panel-pad">
+              <div className="sectiontitle" style={{ marginTop: 0 }}>Risk limits</div>
+              <div className="kv"><span className="k">Max trade notional</span><span className="v">10% of TVL</span></div>
+              <div className="kv"><span className="k">Max price impact</span><span className="v">3%</span></div>
+              <div className="kv"><span className="k">Daily loss breaker</span><span className="v">−15% → auto-freeze</span></div>
+              <div className="kv"><span className="k">Kill switch</span><span className="v pos">armed · trades only</span></div>
+              <p className="dimtx" style={{ fontSize: 12, marginBottom: 0 }}>
+                The risk layer disposes what the strategy proposes. Nothing here can ever block
+                depositor withdrawals.
+              </p>
+            </div>
+          </div>
+
+          <div className="sectiontitle">Recent trades</div>
+          <div className="panel">
+            <TradeTape trades={detail?.trades.slice(0, 15) ?? []} showLag={vault.type === "mirror"} />
+          </div>
+        </>
+      )}
+    </>
+  );
+}

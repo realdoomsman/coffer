@@ -1,0 +1,54 @@
+# Coffer
+
+Trader vaults on Solana. Anyone can open a vault — even with zero SOL. Investors fund it,
+the trader trades it through a scoped program instruction, and **the trader can never
+withdraw**: custody lives in a program-owned PDA with no code path that moves funds to a
+non-vault account. Profits split 70% depositors / 20% trader / 10% platform, and the
+platform's cut buys and locks the token.
+
+Blueprint (decisions, research, roadmap): see the published artifact from the planning
+session. Working codename "Coffer" — rename freely.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `apps/web` | React (Vite) — investor side, trader side, terminal, wallet tracking |
+| `apps/api` | Express + Prisma (SQLite dev / Postgres prod) + in-memory cache (Redis-ready) |
+| `packages/shared` | Shared TypeScript types — the contract between everything |
+| `programs/vault` | Anchor vault program (builds in WSL/CI — Rust not required on this machine) |
+
+## Run it
+
+```bash
+npm install
+npm run db:setup   # prisma generate + db push + seed demo data
+npm run dev        # api :8787 + web :5173
+```
+
+Open http://localhost:5173. Without env config the app runs in **demo mode**: a fake
+signed-in user, seeded vaults/trades, and live token prices from keyless API tiers.
+
+## Environment
+
+Copy `.env.example` → `.env`. Notable:
+
+- `VITE_PRIVY_APP_ID` — accounts are Privy embedded wallets (email/Google → auto Solana
+  wallet, exportable key). Absent → demo auth.
+- `DATABASE_URL` — SQLite by default; switch `provider` in
+  `apps/api/prisma/schema.prisma` to `postgresql` for prod.
+- Mainnet execution stays gated behind `I_UNDERSTAND_LIVE_TRADING_RISKS=yes`. Devnet is
+  the default everywhere.
+
+## Status (P0)
+
+- [x] Monorepo, shared types, dark terminal UI (explore / vault / portfolio / terminal /
+      trader dashboard / tracking / token pages / create-vault)
+- [x] API with demo ledger, seeded vaults, multi-tier price oracle
+      (Jupiter Price v3 → Birdeye → DexScreener; never fabricates)
+- [x] Anchor program source: shares w/ virtual-share protection, worse-of withdrawals,
+      per-depositor HWM fees, NAV bounds + locked-profit drip, scoped `execute_swap`
+- [ ] P1: devnet deploy, real deposits via Privy signing, terminal execution through
+      Jupiter Router `/build` + `execute_swap`
+- [ ] P2: trigger orders, profiles, leaderboards · P3: mirror engine + tracking pipeline
+- [ ] Audit before mainnet: share math rounding, NAV bounds, execute_swap constraints

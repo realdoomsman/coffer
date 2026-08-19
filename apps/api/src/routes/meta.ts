@@ -1,0 +1,33 @@
+import type { PlatformMeta } from "@coffer/shared";
+import { Router } from "express";
+import { getOrSet } from "../cache.js";
+import { prisma } from "../db.js";
+import { solPriceUsd } from "../services/prices.js";
+
+export const metaRouter = Router();
+
+const META_TTL_MS = 10_000;
+
+// GET /api/meta — platform-wide numbers for the header strip. The
+// expensive parts (oracle SOL price, TVL aggregate) cache 10s; apiTime
+// is always live.
+metaRouter.get("/", async (_req, res, next) => {
+  try {
+    const cached = await getOrSet("platform:meta", META_TTL_MS, async () => {
+      const [solUsd, tvlAgg, vaultCount] = await Promise.all([
+        solPriceUsd(),
+        prisma.vault.aggregate({ where: { status: "active" }, _sum: { tvlSol: true } }),
+        prisma.vault.count({ where: { status: "active" } }),
+      ]);
+      return {
+        solPriceUsd: solUsd,
+        tvlSol: tvlAgg._sum.tvlSol ?? 0,
+        vaults: vaultCount,
+      };
+    });
+    const meta: PlatformMeta = { ...cached, apiTime: Math.floor(Date.now() / 1000) };
+    res.json(meta);
+  } catch (err) {
+    next(err);
+  }
+});

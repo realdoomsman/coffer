@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.local
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+.DS_Store
+target/
+.anchor/
+test-ledger/

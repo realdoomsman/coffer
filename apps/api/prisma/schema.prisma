@@ -1,0 +1,187 @@
+// ── Coffer database schema ─────────────────────────────────────────
+// Dev provider is SQLite for zero-setup local runs. The schema is kept
+// Postgres-portable on purpose: scalar types only (String/Int/Float/
+// Boolean/DateTime), no SQLite-specific attributes, no enums (SQLite
+// has none — we validate enum-ish strings at the API boundary instead).
+//
+// Postgres swap: change `provider` below to "postgresql" and set
+// DATABASE_URL="postgresql://user:pass@host:5432/coffer", then run
+// `prisma db push` (or start a real migration history with
+// `prisma migrate dev`). Nothing else in this file needs to change.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL") // dev default: "file:./dev.db" (apps/api/.env)
+}
+
+model User {
+  id          String   @id @default(cuid())
+  privyId     String?  @unique
+  handle      String   @unique
+  displayName String
+  xHandle     String?
+  avatarUrl   String?
+  bio         String?
+  createdAt   DateTime @default(now())
+
+  vaults           Vault[]
+  deposits         Deposit[]
+  withdrawRequests WithdrawRequest[]
+  trackedWallets   TrackedWallet[]
+}
+
+model Vault {
+  id               String   @id @default(cuid())
+  name             String
+  type             String // "managed" | "mirror"
+  status           String   @default("active") // "active" | "frozen" | "closed"
+  traderId         String
+  trader           User     @relation(fields: [traderId], references: [id])
+  leaderWallet     String? // mirror vaults: wallet being copied
+  createdAt        DateTime @default(now())
+  tvlSol           Float    @default(0)
+  sharePriceSol    Float    @default(1)
+  totalShares      Float    @default(0)
+  managerStakeSol  Float    @default(0)
+  perfFeeBps       Int      @default(2000)
+  redeemWindowHours Int     @default(24)
+  solBufferSol     Float    @default(0)
+  thesis           String?
+
+  equityPoints     EquityPoint[]
+  positions        Position[]
+  trades           Trade[]
+  deposits         Deposit[]
+  withdrawRequests WithdrawRequest[]
+  trackedWallets   TrackedWallet[]
+  orders           Order[]
+
+  @@index([traderId])
+  @@index([type, status])
+}
+
+model EquityPoint {
+  id      String @id @default(cuid())
+  vaultId String
+  vault   Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  t       Int // unix seconds
+  v       Float // vault equity in SOL
+
+  @@unique([vaultId, t])
+  @@index([vaultId, t])
+}
+
+model Position {
+  id           String   @id @default(cuid())
+  vaultId      String
+  vault        Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  mint         String
+  symbol       String
+  name         String?
+  amountTokens Float
+  costSol      Float
+  valueSol     Float
+  markStale    Boolean  @default(false)
+  updatedAt    DateTime @updatedAt
+
+  @@unique([vaultId, mint])
+  @@index([vaultId])
+}
+
+model Trade {
+  id           String @id @default(cuid())
+  vaultId      String
+  vault        Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  ts           Int // unix seconds
+  side         String // "buy" | "sell"
+  mint         String
+  symbol       String
+  solAmount    Float
+  tokenAmount  Float
+  priceSol     Float
+  txSig        String @unique
+  source       String // "managed" | "mirror"
+  copyLagSlots Int? // mirror trades: landed slot − leader slot
+
+  @@index([vaultId, ts])
+  @@index([mint])
+}
+
+model Order {
+  id              String  @id @default(cuid())
+  vaultId         String
+  vault           Vault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  mint            String
+  symbol          String
+  kind            String // "take_profit" | "stop_loss" | "limit_buy_dip" | "limit_buy_breakout"
+  triggerPriceUsd Float // trigger on last-trade USD price
+  amountSol       Float? // buys: SOL to spend
+  sellFraction    Float? // sells: fraction of position 0-1
+  status          String  @default("open") // "open" | "filled" | "cancelled" | "failed"
+  createdAt       Int // unix seconds
+  filledAt        Int? // unix seconds
+  filledTradeId   String?
+  failReason      String?
+
+  @@index([status])
+  @@index([vaultId, status])
+}
+
+model Deposit {
+  id        String   @id @default(cuid())
+  vaultId   String
+  vault     Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  shares    Float
+  costSol   Float
+  createdAt DateTime @default(now())
+
+  @@index([vaultId])
+  @@index([userId])
+}
+
+model WithdrawRequest {
+  id                String @id @default(cuid())
+  vaultId           String
+  vault             Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User   @relation(fields: [userId], references: [id])
+  shares            Float
+  valueAtRequestSol Float
+  requestedAt       Int // unix seconds
+  executableAt      Int // unix seconds (requestedAt + redeem window unless instant)
+  status            String @default("pending") // "pending" | "executable" | "paid" | "cancelled"
+  paidAt            Int? // unix seconds, set when status flips to "paid"
+
+  @@index([vaultId, status])
+  @@index([userId, status])
+}
+
+model TrackedWallet {
+  id            String  @id @default(cuid())
+  userId        String
+  user          User    @relation(fields: [userId], references: [id])
+  address       String
+  label         String?
+  winRatePct    Float   @default(0)
+  pnlSol        Float   @default(0)
+  trades        Int     @default(0)
+  profitFactor  Float?
+  lastActiveAt  Int // unix seconds
+  isVaultLeader Boolean @default(false)
+  vaultId       String?
+  vault         Vault?  @relation(fields: [vaultId], references: [id])
+  // real chain scan state (null = never scanned; seeded placeholder stats
+  // survive only until the first real scan overwrites them)
+  scannedAt      Int? // unix seconds of last completed scan
+  scanStatus     String? // "ok" | "partial"
+  recentSwapsJson String? // JSON WalletSwap[] from the last scan
+
+  @@unique([userId, address])
+  @@index([userId])
+}

@@ -1,0 +1,24 @@
+{
+  "name": "coffer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Trader vaults on Solana — traders trade pooled capital they can never withdraw.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "db:setup": "npm run db:push -w apps/api && npm run db:seed -w apps/api",
+    "build": "npm run build -w packages/shared --if-present && npm run build -w apps/api --if-present && npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
