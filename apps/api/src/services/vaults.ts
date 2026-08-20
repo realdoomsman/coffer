@@ -139,9 +139,10 @@ export function toTraderProfile(user: DbUser, allTrades: DbTrade[]): TraderProfi
     displayName: user.displayName,
     xHandle: user.xHandle ?? undefined,
     avatarUrl: user.avatarUrl ?? undefined,
-    // P0 heuristic: linked X handle ⇒ verified badge. Real flow verifies
-    // via X OAuth in the profile service.
-    xVerified: Boolean(user.xHandle),
+    // Verified means X OAuth confirmed ownership — which doesn't exist yet,
+    // so nobody gets the badge. A self-entered handle renders as a plain
+    // link. Flip to a real DB flag when the OAuth flow ships.
+    xVerified: false,
     bio: user.bio ?? undefined,
     onchainStats: traderStatsFromTrades(allTrades),
   };

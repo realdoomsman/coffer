@@ -7,6 +7,7 @@ import { api } from "./lib/api";
 import { useFlash, usePoll } from "./lib/hooks";
 import { useWatchlist } from "./lib/watchlist";
 import { ActivityWire } from "./components/ActivityWire";
+import { DepositModal } from "./components/DepositModal";
 
 const HOTKEYS: Record<string, string> = {
   e: "/explore",
@@ -17,6 +18,7 @@ const HOTKEYS: Record<string, string> = {
   n: "/create",
   w: "/tracking",
   l: "/leaderboards",
+  m: "/settings/profile",
 };
 
 function Nav({ to, hotkey, label, end }: { to: string; hotkey: string; label: string; end?: boolean }) {
@@ -174,6 +176,7 @@ function SolPrice() {
 export default function App() {
   const { user, demo, login, logout } = useAuth();
   const [apiUp, setApiUp] = useState<boolean | null>(null);
+  const [depositOpen, setDepositOpen] = useState(false);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -223,6 +226,7 @@ export default function App() {
         <Nav to="/terminal" hotkey="t" label="Terminal" />
         <Nav to="/dashboard" hotkey="v" label="My vault" />
         <Nav to="/create" hotkey="n" label="Create vault" />
+        <Nav to="/settings/profile" hotkey="m" label="My profile" />
 
         <div className="navsec">Intel</div>
         <Nav to="/tracking" hotkey="w" label="Wallet tracking" />
@@ -236,10 +240,16 @@ export default function App() {
             <div className="s">{demo ? "demo mode" : "privy"}</div>
           </div>
         </div>
-        <button className="btn ghost sm" style={{ margin: "8px 10px 0" }} onClick={user ? logout : login}>
-          {user ? "Sign out" : "Sign in"}
-        </button>
+        <div style={{ display: "flex", gap: 6, margin: "8px 10px 0" }}>
+          <button className="btn primary sm" style={{ flex: 1 }} onClick={() => setDepositOpen(true)}>
+            Deposit
+          </button>
+          <button className="btn ghost sm" onClick={user ? logout : login}>
+            {user ? "Out" : "In"}
+          </button>
+        </div>
       </aside>
+      {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} />}
 
       <div className="main">
         <div className="topbar">

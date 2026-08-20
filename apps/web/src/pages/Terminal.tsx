@@ -20,7 +20,7 @@ import {
   type Trade,
   type Vault,
 } from "@coffer/shared";
-import { api } from "../lib/api";
+import { api, type DcaOrder } from "../lib/api";
 import { useFlash, usePageTitle, usePoll } from "../lib/hooks";
 import { usePresets } from "../lib/presets";
 import { useWatchlist } from "../lib/watchlist";
@@ -77,6 +77,16 @@ export function Terminal() {
   const [orderKind, setOrderKind] = useState<OrderKind>("take_profit");
   const [trigger, setTrigger] = useState("");
   const [orderAmt, setOrderAmt] = useState("1");
+
+  // DCA form
+  const [dcaAmt, setDcaAmt] = useState("0.5");
+  const [dcaEveryMin, setDcaEveryMin] = useState("5");
+  const [dcaLegs, setDcaLegs] = useState("6");
+  const { data: dcas, setData: setDcas } = usePoll<DcaOrder[]>(
+    () => (vaultId ? api.dcaList(vaultId) : Promise.resolve([])),
+    15_000,
+    [vaultId],
+  );
 
   const { data: info } = usePoll<TokenInfo>(() => api.token(mint), 10_000, [mint]);
   const { data: poolStats } = usePoll<TokenPoolStats>(() => api.tokenStats(mint), 30_000, [mint]);
@@ -771,6 +781,87 @@ export function Terminal() {
               The engine checks triggers against live prices every 15s and fires through the same
               trade path.
             </p>
+          </div>
+
+          <div className="panel panel-pad">
+            <div className="sectiontitle" style={{ marginTop: 0 }}>DCA — spread the entry</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label>◎ / leg</label>
+                <input type="number" min="0" step="0.1" value={dcaAmt} onChange={(e) => setDcaAmt(e.target.value)} />
+              </div>
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label>Every (min)</label>
+                <input type="number" min="1" step="1" value={dcaEveryMin} onChange={(e) => setDcaEveryMin(e.target.value)} />
+              </div>
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label>Legs</label>
+                <input type="number" min="1" max="96" step="1" value={dcaLegs} onChange={(e) => setDcaLegs(e.target.value)} />
+              </div>
+            </div>
+            <button
+              className="btn"
+              style={{ width: "100%" }}
+              disabled={
+                busy || !vaultId || !info || info.source === "none" ||
+                (parseFloat(dcaAmt) || 0) <= 0 || (parseInt(dcaLegs) || 0) < 1
+              }
+              onClick={() => {
+                void (async () => {
+                  if (!vaultId) return;
+                  setBusy(true);
+                  try {
+                    const dca = await api.dcaCreate({
+                      vaultId,
+                      mint,
+                      amountSolPerLeg: parseFloat(dcaAmt) || 0.5,
+                      intervalSec: Math.max(60, (parseInt(dcaEveryMin) || 5) * 60),
+                      legsTotal: Math.min(96, Math.max(1, parseInt(dcaLegs) || 6)),
+                    });
+                    setDcas((ds) => [dca, ...(ds ?? [])]);
+                    toast("good", `DCA armed: ${dca.legsTotal}×${fmtSol(dca.amountSolPerLeg)} ◎ ${info?.symbol ?? ""} — leg 1 filled now`);
+                  } catch (e) {
+                    toast("bad", e instanceof Error ? e.message : "DCA failed");
+                  } finally {
+                    setBusy(false);
+                  }
+                })();
+              }}
+            >
+              Start DCA · leg 1 fires now
+            </button>
+            {(dcas ?? []).filter((d) => d.status === "active").length + (dcas ?? []).filter((d) => d.status !== "active").slice(0, 2).length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                {(dcas ?? []).slice(0, 5).map((d) => {
+                  const nextIn = Math.max(0, d.nextLegAt - Math.floor(Date.now() / 1000));
+                  return (
+                    <div key={d.id} className="kv" style={{ alignItems: "center" }}>
+                      <span className="k" style={{ textTransform: "none" }}>
+                        {d.symbol} {d.legsDone}/{d.legsTotal} · {fmtSol(d.amountSolPerLeg)}◎
+                        {d.status === "active" ? ` · next ${Math.floor(nextIn / 60)}m${nextIn % 60}s` : ""}
+                      </span>
+                      <span className="v" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <span className={`pill ${d.status === "active" ? "open" : d.status === "done" ? "filled" : d.status}`}>
+                          {d.status}
+                        </span>
+                        {d.status === "active" && (
+                          <button
+                            className="btn ghost sm"
+                            onClick={() => {
+                              void api.dcaCancel(d.id).then((upd) => {
+                                setDcas((ds) => (ds ?? []).map((x) => (x.id === upd.id ? upd : x)));
+                              });
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="panel panel-pad">

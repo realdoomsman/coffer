@@ -182,4 +182,39 @@ export const api = {
   },
   pulse: () => get<PulseBoard>(`/pulse`),
   tokenStats: (mint: string) => get<TokenPoolStats>(`/tokenstats/${mint}`),
+
+  // ── DCA orders (wire type local until shared package ships it) ──
+  dcaList: async (vaultId: string) => {
+    const r = await get<{ orders: DcaOrder[] }>(`/dca?vaultId=${vaultId}`);
+    return r.orders;
+  },
+  dcaCreate: async (body: {
+    vaultId: string;
+    mint: string;
+    amountSolPerLeg: number;
+    intervalSec: number;
+    legsTotal: number;
+  }) => {
+    const r = await post<{ dca: DcaOrder }>(`/dca`, body);
+    return r.dca;
+  },
+  dcaCancel: async (id: string) => {
+    const r = await post<{ dca: DcaOrder }>(`/dca/${id}/cancel`, {});
+    return r.dca;
+  },
 };
+
+export interface DcaOrder {
+  id: string;
+  vaultId: string;
+  mint: string;
+  symbol: string;
+  amountSolPerLeg: number;
+  intervalSec: number;
+  legsTotal: number;
+  legsDone: number;
+  nextLegAt: number;
+  status: "active" | "done" | "cancelled" | "failed";
+  createdAt: number;
+  failReason?: string;
+}

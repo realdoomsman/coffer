@@ -8,6 +8,11 @@
 //     stop_loss / limit_buy_dip fire at price <= trigger. A buy whose
 //     buffer is gone (or a sell whose position is gone) is marked
 //     failed with a failReason; oracle blackouts just skip the order.
+//     The same interval also fires due DCA legs (active DcaOrders with
+//     nextLegAt <= now): success advances legsDone/nextLegAt (status
+//     "done" on the last leg), a 422 (oracle blackout) retries next
+//     tick WITHOUT advancing, any other TradeError (buffer gone,
+//     frozen vault…) marks the DCA failed with a failReason.
 //
 //   • every 30s — re-mark every open position at the live price
 //     (source none/absent ⇒ markStale, keep the old value), recompute
@@ -30,10 +35,14 @@ let orderTimer: NodeJS.Timeout | null = null;
 let revalTimer: NodeJS.Timeout | null = null;
 let orderTickRunning = false;
 let revalTickRunning = false;
+let dcaTickRunning = false;
 
 export function startOrderEngine(): void {
   if (orderTimer || revalTimer) return; // already running
-  orderTimer = setInterval(() => void orderTick(), ORDER_TICK_MS);
+  orderTimer = setInterval(() => {
+    void orderTick();
+    void dcaTick();
+  }, ORDER_TICK_MS);
   revalTimer = setInterval(() => void revalTick(), REVAL_TICK_MS);
   console.log(
     `[engine] started — orders every ${ORDER_TICK_MS / 1000}s, revaluation every ${REVAL_TICK_MS / 1000}s`,
@@ -117,6 +126,75 @@ async function orderTick(): Promise<void> {
     console.error("[engine] order tick failed:", err);
   } finally {
     orderTickRunning = false;
+  }
+}
+
+// ── DCA legs ───────────────────────────────────────────────────────
+// Fire every active DcaOrder whose nextLegAt is due. Legs go through
+// the same trading service as everything else, so buffer accounting,
+// live-mark enforcement, and equity points all come for free.
+
+async function dcaTick(): Promise<void> {
+  if (dcaTickRunning) return; // previous tick still in flight
+  dcaTickRunning = true;
+  try {
+    const now = nowSec();
+    const due = await prisma.dcaOrder.findMany({
+      where: { status: "active", nextLegAt: { lte: now } },
+    });
+
+    for (const dca of due) {
+      // each DCA is isolated — one failure never kills the tick
+      try {
+        // re-read: a cancel may have landed since the findMany
+        const fresh = await prisma.dcaOrder.findUnique({ where: { id: dca.id } });
+        if (!fresh || fresh.status !== "active") continue;
+
+        try {
+          const result = await executeTrade(fresh.vaultId, {
+            side: "buy",
+            mint: fresh.mint,
+            solAmount: fresh.amountSolPerLeg,
+          });
+          const legsDone = fresh.legsDone + 1;
+          const done = legsDone >= fresh.legsTotal;
+          await prisma.dcaOrder.update({
+            where: { id: fresh.id },
+            data: {
+              legsDone,
+              lastTradeId: result.trade.id,
+              nextLegAt: fresh.nextLegAt + fresh.intervalSec,
+              status: done ? "done" : "active",
+            },
+          });
+          console.log(
+            `[engine] filled dca leg ${legsDone}/${fresh.legsTotal} ${fresh.id} (${fresh.symbol}) ` +
+              `${fresh.amountSolPerLeg} SOL → trade ${result.trade.id}${done ? " — dca done" : ""}`,
+          );
+        } catch (err) {
+          if (err instanceof TradeError && err.status === 422) {
+            // oracle blackout — retry next tick WITHOUT advancing
+            continue;
+          }
+          if (err instanceof TradeError) {
+            // structural rejection: buffer gone, vault frozen/closed…
+            await prisma.dcaOrder.update({
+              where: { id: fresh.id },
+              data: { status: "failed", failReason: err.message },
+            });
+            console.log(`[engine] failed dca ${fresh.id} (${fresh.symbol}): ${err.message}`);
+          } else {
+            throw err; // transient (db hiccup) — stays active
+          }
+        }
+      } catch (err) {
+        console.error(`[engine] error executing dca ${dca.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[engine] dca tick failed:", err);
+  } finally {
+    dcaTickRunning = false;
   }
 }
 

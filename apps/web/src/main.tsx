@@ -17,6 +17,7 @@ import { TokenPage } from "./pages/TokenPage";
 import { CreateVault } from "./pages/CreateVault";
 import { TraderPage } from "./pages/TraderPage";
 import { Leaderboards } from "./pages/Leaderboards";
+import { ProfileEditor } from "./pages/ProfileEditor";
 
 function Crash() {
   return (
@@ -46,6 +47,7 @@ const router = createBrowserRouter([
       { path: "token/:mint", element: <TokenPage /> },
       { path: "trader/:handle", element: <TraderPage /> },
       { path: "leaderboards", element: <Leaderboards /> },
+      { path: "settings/profile", element: <ProfileEditor /> },
       { path: "create", element: <CreateVault /> },
       { path: "*", element: <Navigate to="/explore" replace /> },
     ],

@@ -8,6 +8,7 @@ import express, {
 } from "express";
 import { env } from "./env.js";
 import { activityRouter } from "./routes/activity.js";
+import { dcaRouter } from "./routes/dca.js";
 import { healthRouter } from "./routes/health.js";
 import { metaRouter } from "./routes/meta.js";
 import { ohlcvRouter } from "./routes/ohlcv.js";
@@ -37,6 +38,7 @@ app.use("/api/pulse", pulseRouter);
 app.use("/api/security", securityRouter);
 app.use("/api/ohlcv", ohlcvRouter);
 app.use("/api/orders", ordersRouter);
+app.use("/api/dca", dcaRouter);
 app.use("/api/portfolio", portfolioRouter);
 app.use("/api/wallets", walletsRouter);
 app.use("/api/activity", activityRouter);
@@ -75,6 +77,7 @@ const ROUTES: Array<[string, string]> = [
   ["POST", "/api/orders"],
   ["GET ", "/api/orders?vaultId=&status="],
   ["POST", "/api/orders/:id/cancel"],
+  ["*   ", "/api/dca (POST · GET ?vaultId= · POST /:id/cancel)"],
   ["GET ", "/api/portfolio"],
   ["GET ", "/api/wallets/tracked"],
   ["POST", "/api/wallets/tracked"],

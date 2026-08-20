@@ -59,6 +59,7 @@ model Vault {
   withdrawRequests WithdrawRequest[]
   trackedWallets   TrackedWallet[]
   orders           Order[]
+  dcaOrders        DcaOrder[]
 
   @@index([traderId])
   @@index([type, status])
@@ -129,6 +130,25 @@ model Order {
 
   @@index([status])
   @@index([vaultId, status])
+}
+
+model DcaOrder {
+  id              String  @id @default(cuid())
+  vaultId         String
+  vault           Vault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  mint            String
+  symbol          String
+  amountSolPerLeg Float // SOL spent per leg
+  intervalSec     Int // seconds between legs (min 60)
+  legsTotal       Int // 1-96
+  legsDone        Int     @default(0)
+  nextLegAt       Int // unix seconds — engine fires when <= now
+  status          String  @default("active") // "active" | "done" | "cancelled" | "failed"
+  createdAt       Int // unix seconds
+  lastTradeId     String?
+  failReason      String?
+
+  @@index([status])
 }
 
 model Deposit {
