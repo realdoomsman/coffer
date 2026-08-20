@@ -7,12 +7,7 @@
 
 import type { TokenSearchResult, TrendingToken } from "@coffer/shared";
 import { getOrSet } from "../cache.js";
-import {
-  getTokenInfo,
-  getTokenInfos,
-  MCAP_SANITY_MAX_USD,
-  TRUSTED_QUOTE_MINTS,
-} from "./prices.js";
+import { getTokenInfo, MCAP_SANITY_MAX_USD, TRUSTED_QUOTE_MINTS } from "./prices.js";
 
 const FETCH_TIMEOUT_MS = 8_000;
 const SEARCH_TTL_MS = 60_000;
@@ -22,15 +17,14 @@ const TRENDING_LIMIT = 10;
 
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** Real, seeded mints — trending fallback when GeckoTerminal is down. */
-const WELL_KNOWN_MINTS = [
-  "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
-  "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", // WIF
-  "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", // POPCAT
-  "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", // PUMP
-  "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", // JUP
-  "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", // RAY
-];
+/**
+ * Platform mandate: discovery surfaces pump.fun tokens ONLY. Bonding-curve
+ * mints carry the "pump" suffix; graduated pools live on pump.fun's AMM.
+ * The oracle itself still prices any mint (vault positions must never go
+ * blind) — but search/trending refuse to SURFACE non-pump tokens.
+ */
+export const isPumpMint = (mint: string): boolean => mint.toLowerCase().endsWith("pump");
+const PUMP_DEX_IDS = new Set(["pumpfun", "pump-fun", "pumpswap"]);
 
 async function fetchJson(url: string): Promise<unknown> {
   const res = await fetch(url, {
@@ -45,6 +39,7 @@ async function fetchJson(url: string): Promise<unknown> {
 
 interface DexSearchPair {
   chainId?: string;
+  dexId?: string;
   priceUsd?: string;
   fdv?: number;
   marketCap?: number;
@@ -78,6 +73,7 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
 
   // Raw mint → resolve through the oracle into a single result.
   if (BASE58_RE.test(q)) {
+    if (!isPumpMint(q)) return []; // pump.fun tokens only
     const info = await getTokenInfo(q);
     if (info.source === "none") return [];
     return [
@@ -105,6 +101,8 @@ export async function searchTokens(query: string): Promise<TokenSearchResult[]> 
       for (const pair of body?.pairs ?? []) {
         const mint = pair?.baseToken?.address;
         if (pair?.chainId !== "solana" || !mint) continue;
+        // pump.fun tokens only
+        if (!isPumpMint(mint) && !PUMP_DEX_IDS.has(pair.dexId ?? "")) continue;
         const held = byMint.get(mint);
         if (!held || betterPair(pair, held)) {
           byMint.set(mint, pair);
@@ -182,6 +180,7 @@ export async function getTrending(): Promise<TrendingToken[]> {
         // token id is "solana_<mint>" — attributes.address is authoritative
         const mint = token?.address ?? tokenId.replace(/^solana_/, "");
         if (!mint || seen.has(mint)) continue;
+        if (!isPumpMint(mint)) continue; // pump.fun tokens only
         seen.add(mint);
         const attrs = pool.attributes ?? {};
         const imageUrl = token?.image_url;
@@ -209,24 +208,10 @@ export async function getTrending(): Promise<TrendingToken[]> {
   });
 }
 
-/** Oracle marks for the seeded well-known mints — never throws. */
+/**
+ * No fabricated fallback: when GeckoTerminal is down, trending is honestly
+ * empty rather than a hardcoded list dressed up as "trending".
+ */
 async function trendingFallback(): Promise<TrendingToken[]> {
-  try {
-    const infos = await getTokenInfos(WELL_KNOWN_MINTS);
-    return infos
-      .filter((i) => i.source !== "none")
-      .map((i): TrendingToken => ({
-        mint: i.mint,
-        symbol: i.symbol,
-        name: i.name,
-        priceUsd: i.priceUsd,
-        mcapUsd: i.mcapUsd,
-        liquidityUsd: i.liquidityUsd,
-        imageUrl: i.imageUrl,
-        change24hPct: i.change24hPct,
-        volume24hUsd: i.volume24hUsd,
-      }));
-  } catch {
-    return [];
-  }
+  return [];
 }

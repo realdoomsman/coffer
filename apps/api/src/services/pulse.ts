@@ -251,14 +251,16 @@ const QUOTE_MINTS = new Set([
 
 /** Post-graduation venues: pump.fun's AMM plus the raydium/meteora pools
  *  bonding-curve tokens migrate into. `pump-fun` itself is the curve. */
-const MIGRATED_DEX_IDS = new Set([
-  "pumpswap",
-  "raydium",
-  "raydium-clmm",
-  "raydium-cpmm",
-  "meteora",
-  "meteora-damm-v2",
-]);
+// Platform mandate: pump.fun tokens only. A graduated pump token lives on
+// pumpswap, or (pre-pumpswap era / re-pooled) carries the "pump" mint
+// suffix wherever it trades.
+const isPumpMint = (mint: string) => mint.toLowerCase().endsWith("pump");
+
+function isPumpPool(pool: GtPool): boolean {
+  const dex = pool.relationships?.dex?.data?.id ?? "";
+  const mint = (pool.relationships?.base_token?.data?.id ?? "").replace(/^solana_/, "");
+  return dex === "pumpswap" || dex === "pump-fun" || isPumpMint(mint);
+}
 
 function gtPoolCard(
   pool: GtPool,
@@ -399,13 +401,9 @@ async function buildBoard(): Promise<PulseBoard> {
   let migratedTitle = "Migrated";
   let migratedCards: PulseCard[] = [];
   try {
-    migratedCards = gtCardsFrom(newPoolPages, now, (pool) =>
-      MIGRATED_DEX_IDS.has(pool.relationships?.dex?.data?.id ?? ""),
-    );
-    if (migratedCards.length === 0 && !pumpOk) {
-      migratedTitle = "New pools";
-      migratedCards = gtCardsFrom(newPoolPages, now, () => true);
-    }
+    // pump.fun tokens only — even in the degraded no-pump.fun-API case
+    // the column never shows non-pump pools.
+    migratedCards = gtCardsFrom(newPoolPages, now, isPumpPool);
   } catch {
     migratedCards = [];
   }

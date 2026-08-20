@@ -31,7 +31,9 @@ import { RatioBar, TimeframeStrip } from "../components/market";
 const TFS = ["1m", "5m", "15m", "1h"] as const;
 type Tf = (typeof TFS)[number];
 
-const DEFAULT_MINT = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // BONK
+// pump.fun tokens only — default to a deep-liquidity graduated pump token;
+// discovery (trending rail, search, Pulse) surfaces nothing else.
+const DEFAULT_MINT = "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump"; // Fartcoin
 
 const ORDER_KINDS: { id: OrderKind; label: string; side: "sell" | "buy" }[] = [
   { id: "take_profit", label: "Take profit", side: "sell" },
