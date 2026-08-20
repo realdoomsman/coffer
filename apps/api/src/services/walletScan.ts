@@ -8,6 +8,11 @@
 // wallet with zero detectable swaps returns zeroed stats with
 // scanStatus "ok"; a scan interrupted by rate limits keeps what it has
 // and reports "partial". Results cache 10 minutes per wallet.
+//
+// The per-transaction classifier (classifySwap) and the RPC helpers are
+// exported for reuse — the paper mirror engine (mirrorEngine.ts) runs
+// the SAME classification over a leader wallet's new transactions
+// instead of duplicating the balance-diff logic.
 
 import type { TradeSide, TraderStats, WalletSwap } from "@coffer/shared";
 import { cacheDelete, getOrSet } from "../cache.js";
@@ -39,7 +44,7 @@ export interface WalletScanResult {
 
 let rpcId = 0;
 
-class RpcHttpError extends Error {
+export class RpcHttpError extends Error {
   readonly status: number;
   /** seconds the server asked us to wait (Retry-After), if sent */
   readonly retryAfterSec?: number;
@@ -70,7 +75,7 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   return body.result as T;
 }
 
-interface SigInfo {
+export interface SigInfo {
   signature: string;
   blockTime?: number | null;
   err?: unknown;
@@ -83,7 +88,7 @@ interface TokenBalance {
   uiTokenAmount?: { amount?: string; decimals?: number };
 }
 
-interface ParsedTx {
+export interface ParsedTx {
   blockTime?: number | null;
   meta?: {
     err?: unknown;
@@ -100,17 +105,30 @@ interface ParsedTx {
 
 // ── classification by balance diffing ──────────────────────────────
 
-interface ClassifiedSwap extends WalletSwap {
-  /** token leg in raw units + decimals — kept internally for FIFO pairing */
+export interface ClassifiedSwap extends WalletSwap {
+  /** token leg in raw units + decimals — used for FIFO pairing and sell fractions */
   tokenRaw: bigint;
   decimals: number;
+  /**
+   * The wallet's raw balance of the moved mint BEFORE the swap (summed
+   * over its token accounts). For sells this makes the sold fraction
+   * honestly derivable: tokenRaw / preRaw.
+   */
+  preRaw: bigint;
 }
 
 function bigAbs(v: bigint): bigint {
   return v < 0n ? -v : v;
 }
 
-function classifySwap(wallet: string, sig: SigInfo, tx: ParsedTx): ClassifiedSwap | undefined {
+/**
+ * Classify one parsed transaction as a SOL↔token swap by balance
+ * diffing (SOL down + one token up = BUY; one token down + SOL up =
+ * SELL). Returns undefined for anything that isn't a clean single-mint
+ * SOL swap by `wallet` — failed txs, transfers, airdrops, dust,
+ * token-to-token routes.
+ */
+export function classifySwap(wallet: string, sig: SigInfo, tx: ParsedTx): ClassifiedSwap | undefined {
   const meta = tx.meta;
   if (!meta || meta.err) return undefined; // failed txs never count
   const keys = (tx.transaction?.message?.accountKeys ?? []).map((k) =>
@@ -126,7 +144,10 @@ function classifySwap(wallet: string, sig: SigInfo, tx: ParsedTx): ClassifiedSwa
   if (idx === 0) solDelta += BigInt(meta.fee ?? 0);
 
   // (b) per-mint token deltas where the wallet owns the token account.
+  // preRawByMint keeps the wallet's pre-swap balances so a SELL's sold
+  // fraction (tokenRaw / preRaw) is derivable from real chain data.
   const deltas = new Map<string, { delta: bigint; decimals: number }>();
+  const preRawByMint = new Map<string, bigint>();
   const fold = (rows: TokenBalance[] | undefined, sign: 1n | -1n): void => {
     for (const b of rows ?? []) {
       if (b.owner !== wallet || !b.mint) continue;
@@ -138,6 +159,9 @@ function classifySwap(wallet: string, sig: SigInfo, tx: ParsedTx): ClassifiedSwa
       };
       entry.delta += sign * BigInt(amount);
       deltas.set(b.mint, entry);
+      if (sign === -1n) {
+        preRawByMint.set(b.mint, (preRawByMint.get(b.mint) ?? 0n) + BigInt(amount));
+      }
     }
   };
   fold(meta.postTokenBalances, 1n);
@@ -168,6 +192,7 @@ function classifySwap(wallet: string, sig: SigInfo, tx: ParsedTx): ClassifiedSwa
     txSig: sig.signature,
     tokenRaw: bigAbs(tokenLeg.delta),
     decimals: tokenLeg.decimals,
+    preRaw: preRawByMint.get(mint) ?? 0n,
   };
 }
 
@@ -258,7 +283,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * with a Retry-After we can afford inside the deadline waits that long;
  * anything we can't afford propagates so the scan ends partial.
  */
-async function rpcWithRetry<T>(method: string, params: unknown[], deadline: number): Promise<T> {
+export async function rpcWithRetry<T>(method: string, params: unknown[], deadline: number): Promise<T> {
   let backoff = RETRY_BACKOFF_MS;
   for (let attempt = 0; ; attempt++) {
     try {

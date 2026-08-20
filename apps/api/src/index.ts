@@ -23,6 +23,7 @@ import { tradersRouter } from "./routes/traders.js";
 import { vaultsRouter } from "./routes/vaults.js";
 import { walletsRouter } from "./routes/wallets.js";
 import { withdrawalsRouter } from "./routes/withdrawals.js";
+import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
 
 const app = express();
@@ -73,6 +74,7 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/health"],
   ["GET ", "/api/vaults?sort=&type=&mode="],
   ["GET ", "/api/vaults/:id"],
+  ["GET ", "/api/vaults/:id/mirror"],
   ["POST", "/api/vaults"],
   ["POST", "/api/vaults/:id/deposit"],
   ["POST", "/api/vaults/:id/withdraw"],
@@ -104,13 +106,15 @@ const server = app.listen(env.port, () => {
   console.log(`[api] coffer api listening on http://localhost:${env.port}`);
   console.log(`[api] db: ${env.databaseUrl}`);
   for (const [method, path] of ROUTES) console.log(`  ${method} ${path}`);
-  // Trigger engine + live revaluation only run alongside the server —
-  // never during seed (seed.ts doesn't import this module).
+  // Trigger engine + live revaluation + mirror sync only run alongside
+  // the server — never during seed (seed.ts doesn't import this module).
   startOrderEngine();
+  startMirrorEngine();
 });
 
 function shutdown(): void {
   stopOrderEngine();
+  stopMirrorEngine();
   server.close(() => process.exit(0));
   // failsafe if a keep-alive socket stalls close()
   setTimeout(() => process.exit(0), 3_000).unref();

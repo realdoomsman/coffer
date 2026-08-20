@@ -91,19 +91,66 @@ vaultsRouter.get("/:id", async (req, res, next) => {
   }
 });
 
+// GET /api/vaults/:id/mirror — mirror copy config + sync state. Kept as
+// its own endpoint because the shared Vault shape has no mirror-config
+// fields (packages/shared is not extended here). fixedSol/maxSol report
+// the EFFECTIVE values (engine defaults applied when the row is null).
+vaultsRouter.get("/:id/mirror", async (req, res, next) => {
+  try {
+    const vault = await prisma.vault.findUnique({ where: { id: req.params.id } });
+    if (!vault) {
+      res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (vault.type !== "mirror") {
+      res.status(404).json({ error: "not a mirror vault" });
+      return;
+    }
+    res.json({
+      config: {
+        sizingMode: vault.mirrorSizingMode ?? "fixed",
+        fixedSol: vault.mirrorFixedSol ?? 0.25,
+        maxSol: vault.mirrorMaxSol ?? 1.0,
+      },
+      leaderWallet: vault.leaderWallet,
+      lastSig: vault.mirrorLastSig,
+      syncedAt: vault.mirrorSyncedAt,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/vaults — create a vault (demo user becomes the trader).
 // mode defaults to "real" when omitted: the MAIN platform is real SOL.
 // Creating a real vault is just a DB row — its on-chain init is pending,
 // and every ledger operation against it is walled until the program ships.
+// Mirror vaults additionally accept mirrorSizingMode ("fixed" |
+// "proportional"), mirrorFixedSol (0.01–100) and mirrorMaxSol
+// (>= fixed); omitted values fall back to the engine defaults
+// (fixed, 0.25 SOL, cap 1.0 SOL).
 vaultsRouter.post("/", async (req, res, next) => {
   try {
-    const { name, type, mode, perfFeeBps, thesis, leaderWallet } = (req.body ?? {}) as {
+    const {
+      name,
+      type,
+      mode,
+      perfFeeBps,
+      thesis,
+      leaderWallet,
+      mirrorSizingMode,
+      mirrorFixedSol,
+      mirrorMaxSol,
+    } = (req.body ?? {}) as {
       name?: string;
       type?: string;
       mode?: string;
       perfFeeBps?: number;
       thesis?: string;
       leaderWallet?: string;
+      mirrorSizingMode?: string;
+      mirrorFixedSol?: number;
+      mirrorMaxSol?: number;
     };
     if (!name || typeof name !== "string" || name.trim().length < 3) {
       res.status(400).json({ error: "name must be at least 3 characters" });
@@ -122,6 +169,42 @@ vaultsRouter.post("/", async (req, res, next) => {
       res.status(400).json({ error: "mirror vaults require leaderWallet" });
       return;
     }
+    // ── mirror copy config (mirror vaults only) ──────────────────────
+    if (
+      type !== "mirror" &&
+      (mirrorSizingMode !== undefined || mirrorFixedSol !== undefined || mirrorMaxSol !== undefined)
+    ) {
+      res.status(400).json({ error: "mirror sizing config only applies to mirror vaults" });
+      return;
+    }
+    if (
+      mirrorSizingMode !== undefined &&
+      mirrorSizingMode !== "fixed" &&
+      mirrorSizingMode !== "proportional"
+    ) {
+      res.status(400).json({ error: 'mirrorSizingMode must be "fixed" or "proportional"' });
+      return;
+    }
+    if (
+      mirrorFixedSol !== undefined &&
+      (typeof mirrorFixedSol !== "number" || !Number.isFinite(mirrorFixedSol) ||
+        mirrorFixedSol < 0.01 || mirrorFixedSol > 100)
+    ) {
+      res.status(400).json({ error: "mirrorFixedSol must be a number between 0.01 and 100" });
+      return;
+    }
+    // max must cover the effective fixed size (default 0.25 when omitted)
+    const effectiveFixed = mirrorFixedSol ?? 0.25;
+    if (
+      mirrorMaxSol !== undefined &&
+      (typeof mirrorMaxSol !== "number" || !Number.isFinite(mirrorMaxSol) ||
+        mirrorMaxSol < effectiveFixed)
+    ) {
+      res.status(400).json({
+        error: `mirrorMaxSol must be a number >= the fixed copy size (${effectiveFixed})`,
+      });
+      return;
+    }
     const fee = Math.min(
       PERF_FEE_MAX_BPS,
       Math.max(PERF_FEE_MIN_BPS, Math.round(Number(perfFeeBps) || PERF_FEE_DEFAULT_BPS)),
@@ -135,6 +218,9 @@ vaultsRouter.post("/", async (req, res, next) => {
         status: "active",
         traderId: trader.id,
         leaderWallet: type === "mirror" ? leaderWallet : null,
+        mirrorSizingMode: type === "mirror" ? (mirrorSizingMode ?? null) : null,
+        mirrorFixedSol: type === "mirror" ? (mirrorFixedSol ?? null) : null,
+        mirrorMaxSol: type === "mirror" ? (mirrorMaxSol ?? null) : null,
         tvlSol: 0,
         sharePriceSol: 1,
         totalShares: 0,

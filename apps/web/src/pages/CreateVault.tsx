@@ -14,6 +14,9 @@ export function CreateVault() {
   const [perfFee, setPerfFee] = useState(PERF_FEE_DEFAULT_BPS / 100);
   const [thesis, setThesis] = useState("");
   const [leader, setLeader] = useState(params.get("leader") ?? "");
+  const [sizingMode, setSizingMode] = useState<"fixed" | "proportional">("fixed");
+  const [fixedSol, setFixedSol] = useState("0.25");
+  const [maxSol, setMaxSol] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +32,13 @@ export function CreateVault() {
         perfFeeBps: Math.round(perfFee * 100),
         thesis: thesis.trim() || undefined,
         leaderWallet: type === "mirror" ? leader.trim() : undefined,
+        ...(type === "mirror"
+          ? {
+              mirrorSizingMode: sizingMode,
+              mirrorFixedSol: parseFloat(fixedSol) || 0.25,
+              mirrorMaxSol: parseFloat(maxSol) || 1,
+            }
+          : {}),
       });
       nav(`/vault/${v.id}`);
     } catch (err) {
@@ -84,11 +94,34 @@ export function CreateVault() {
           </div>
 
           {type === "mirror" && (
-            <div className="field">
-              <label>Leader wallet</label>
-              <input value={leader} onChange={(e) => setLeader(e.target.value)} placeholder="wallet to copy-trade" spellCheck={false} required />
-              <div className="hint">The engine mirrors this wallet's trades. Copy lag is published on the vault page.</div>
-            </div>
+            <>
+              <div className="field">
+                <label>Leader wallet</label>
+                <input value={leader} onChange={(e) => setLeader(e.target.value)} placeholder="wallet to copy-trade" spellCheck={false} required />
+                <div className="hint">The engine mirrors this wallet's trades from attach time forward — history is never replayed. Copy lag is published on the vault page.</div>
+              </div>
+              <div className="field">
+                <label>Copy sizing</label>
+                <div className="chipsrow">
+                  <button type="button" className={`chip ${sizingMode === "fixed" ? "on" : ""}`} onClick={() => setSizingMode("fixed")}>
+                    fixed SOL per copy
+                  </button>
+                  <button type="button" className={`chip ${sizingMode === "proportional" ? "on" : ""}`} onClick={() => setSizingMode("proportional")}>
+                    proportional to leader
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div className="field">
+                  <label>{sizingMode === "fixed" ? "SOL per copied buy" : "Base size (◎)"}</label>
+                  <input type="number" min="0.01" max="100" step="0.05" value={fixedSol} onChange={(e) => setFixedSol(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Max per copy (◎)</label>
+                  <input type="number" min="0.01" step="0.1" value={maxSol} onChange={(e) => setMaxSol(e.target.value)} />
+                </div>
+              </div>
+            </>
           )}
 
           <div className="field">

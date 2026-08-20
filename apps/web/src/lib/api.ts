@@ -79,6 +79,9 @@ export const api = {
     perfFeeBps: number;
     thesis?: string;
     leaderWallet?: string;
+    mirrorSizingMode?: "fixed" | "proportional";
+    mirrorFixedSol?: number;
+    mirrorMaxSol?: number;
   }) => {
     const r = await post<{ vault: Vault }>(`/vaults`, body);
     return r.vault;
@@ -177,6 +180,13 @@ export const api = {
       `/withdrawals/${id}/execute`,
       {},
     ),
+  mirrorState: (vaultId: string) =>
+    get<{
+      config: { sizingMode: "fixed" | "proportional"; fixedSol: number; maxSol: number };
+      leaderWallet: string | null;
+      lastSig: string | null;
+      syncedAt: number | null;
+    }>(`/vaults/${vaultId}/mirror`),
   scanWallet: async (address: string, force = false) => {
     const r = await post<{ wallet: TrackedWallet }>(
       `/wallets/tracked/${address}/scan${force ? "?force=1" : ""}`,

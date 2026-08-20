@@ -48,6 +48,13 @@ model Vault {
   traderId         String
   trader           User     @relation(fields: [traderId], references: [id])
   leaderWallet     String? // mirror vaults: wallet being copied
+  // ── mirror copy config (paper mirror engine) ──────────────────────
+  // null values mean "use the engine default" (fixed 0.25 SOL, max 1.0).
+  mirrorSizingMode String? // "fixed" | "proportional" (null = fixed)
+  mirrorFixedSol   Float? // fixed mode: SOL per copied buy (default 0.25)
+  mirrorMaxSol     Float? // hard per-copy cap in SOL (default 1.0)
+  mirrorLastSig    String? // dedupe cursor: newest leader sig already processed
+  mirrorSyncedAt   Int? // unix seconds of the last completed leader sync
   createdAt        DateTime @default(now())
   tvlSol           Float    @default(0)
   sharePriceSol    Float    @default(1)

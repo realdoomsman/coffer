@@ -20,6 +20,7 @@ export function VaultPage() {
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]["id"]>("30d");
   const [hypo, setHypo] = useState("10");
+  const [mirror, setMirror] = useState<Awaited<ReturnType<typeof api.mirrorState>> | null>(null);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -36,6 +37,23 @@ export function VaultPage() {
     }, 15_000);
     return () => clearInterval(iv);
   }, [load]);
+
+  // mirror vaults: copy engine sync state (60s cadence like the engine)
+  useEffect(() => {
+    if (!id || data?.vault.type !== "mirror") return;
+    let alive = true;
+    const loadMirror = () =>
+      api
+        .mirrorState(id)
+        .then((m) => alive && setMirror(m))
+        .catch(() => {});
+    loadMirror();
+    const iv = setInterval(loadMirror, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [id, data?.vault.type]);
   usePageTitle(data?.vault.name ?? "Vault");
 
   if (error) return <div className="callout red">Couldn't load vault: {error}</div>;
@@ -137,6 +155,37 @@ export function VaultPage() {
               </span>
             </div>
           </div>
+
+          {vault.type === "mirror" && mirror && (
+            <div className="panel panel-pad">
+              <div className="sectiontitle" style={{ marginTop: 0 }}>Copy engine</div>
+              <div className="kv">
+                <span className="k">Leader</span>
+                <span className="v">{mirror.leaderWallet ? <AddressChip addr={mirror.leaderWallet} /> : "—"}</span>
+              </div>
+              <div className="kv">
+                <span className="k">Sizing</span>
+                <span className="v">
+                  {mirror.config.sizingMode === "fixed"
+                    ? `${mirror.config.fixedSol} ◎ / copy`
+                    : "proportional"}{" "}
+                  · cap {mirror.config.maxSol} ◎
+                </span>
+              </div>
+              <div className="kv">
+                <span className="k">Last sync</span>
+                <span className="v">
+                  {mirror.syncedAt
+                    ? `${Math.max(0, Math.floor((Date.now() / 1000 - mirror.syncedAt) / 60))}m ago`
+                    : "attaching…"}
+                </span>
+              </div>
+              <p className="dimtx" style={{ fontSize: 11.5, marginBottom: 0 }}>
+                Copies from attach time forward — never replayed history. Copy lag on each fill is
+                the elapsed-time estimate shown in the tape.
+              </p>
+            </div>
+          )}
 
           <div className="panel panel-pad">
             <div className="sectiontitle" style={{ marginTop: 0 }}>If you deposit</div>
