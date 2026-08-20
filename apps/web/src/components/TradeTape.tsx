@@ -46,9 +46,15 @@ export function TradeTape({ trades, showLag }: { trades: Trade[]; showLag?: bool
                 </td>
               )}
               <td className="r">
-                <a className="mono dimtx" href={solscanTx(t.txSig)} target="_blank" rel="noreferrer">
-                  {shortAddr(t.txSig, 4)}
-                </a>
+                {t.txSig.startsWith("demo-") ? (
+                  <span className="pill neutral" title="Ledger fill — on-chain execution arrives with the devnet deploy">
+                    ledger
+                  </span>
+                ) : (
+                  <a className="mono dimtx" href={solscanTx(t.txSig)} target="_blank" rel="noreferrer">
+                    {shortAddr(t.txSig, 4)}
+                  </a>
+                )}
               </td>
             </tr>
           ))}

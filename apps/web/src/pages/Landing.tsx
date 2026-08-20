@@ -115,6 +115,12 @@ export function Landing() {
         <section className="lsect">
           <h2>Live vaults</h2>
           <p className="lead">Real track records — wins, losses, and drawdowns included.</p>
+          {best.length === 0 && (
+            <div className="empty">
+              Nothing listed yet — every vault here earns its numbers from real activity.
+              Be first: open the app and create one.
+            </div>
+          )}
           <div className="vaultgrid">
             {best.slice(0, 3).map((v) => (
               <Link key={v.id} to={`/vault/${v.id}`} className="vcard">

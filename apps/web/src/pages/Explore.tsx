@@ -105,7 +105,15 @@ export function Explore() {
         </div>
       )}
 
-      {vaults && view === "cards" && (
+      {vaults && vaults.length === 0 && (
+        <div className="empty">
+          No vaults exist yet — this platform shows nothing it didn't do.{" "}
+          <Link to="/create">Create the first vault</Link> (0 SOL needed) and its record builds
+          from real activity.
+        </div>
+      )}
+
+      {vaults && vaults.length > 0 && view === "cards" && (
         <div className="vaultgrid">
           {shown.map((v) => (
             <VaultCard key={v.id} vault={v} />
@@ -113,7 +121,7 @@ export function Explore() {
         </div>
       )}
 
-      {vaults && view === "table" && (
+      {vaults && vaults.length > 0 && view === "table" && (
         <div className="panel">
           <div className="tablewrap">
             <table className="data">

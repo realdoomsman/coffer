@@ -84,33 +84,41 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14, alignItems: "center" }}>
-          {demo && (
-            <div className="callout" style={{ width: "100%" }}>
-              Demo account — this address is a placeholder. Set{" "}
-              <span className="mono">VITE_PRIVY_APP_ID</span> and sign in to get your real embedded
-              wallet with an exportable key.
-            </div>
+          {addr ? (
+            <>
+              <canvas
+                ref={canvasRef}
+                style={{ border: "1px solid var(--line-2)", imageRendering: "pixelated" }}
+                aria-label="Deposit address QR code"
+              />
+              <button
+                className="addr"
+                style={{ cursor: "pointer", fontSize: 12, padding: "6px 12px" }}
+                onClick={() => void copy()}
+                title={addr}
+              >
+                {shortAddr(addr, 8)} {copied ? "✓" : "⧉"}
+              </button>
+              <div className="dimtx" style={{ fontSize: 11.5, textAlign: "center" }}>
+                Send SOL only, on Solana. Deposits land in your account wallet — from there you
+                allocate into vaults.
+              </div>
+              <button className="btn primary" style={{ width: "100%" }} onClick={() => void copy()}>
+                Copy address
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="empty" style={{ width: "100%" }}>
+                No wallet on this account yet
+              </div>
+              <div className="dimtx" style={{ fontSize: 12, textAlign: "center" }}>
+                {demo
+                  ? "Demo mode has no real address — nothing here pretends otherwise. Set VITE_PRIVY_APP_ID in .env and sign in: Privy creates your embedded Solana wallet (exportable key) and this modal shows the real address + QR."
+                  : "Sign-in did not return a wallet — retry or check your Privy configuration."}
+              </div>
+            </>
           )}
-          <canvas
-            ref={canvasRef}
-            style={{ border: "1px solid var(--line-2)", imageRendering: "pixelated" }}
-            aria-label="Deposit address QR code"
-          />
-          <button
-            className="addr"
-            style={{ cursor: "pointer", fontSize: 12, padding: "6px 12px" }}
-            onClick={() => void copy()}
-            title={addr}
-          >
-            {shortAddr(addr, 8)} {copied ? "✓" : "⧉"}
-          </button>
-          <div className="dimtx" style={{ fontSize: 11.5, textAlign: "center" }}>
-            Send SOL only, on Solana {demo ? "devnet" : "mainnet"}. Deposits land in your account
-            wallet — from there you allocate into vaults.
-          </div>
-          <button className="btn primary" style={{ width: "100%" }} onClick={() => void copy()}>
-            Copy address
-          </button>
         </div>
       </div>
     </div>

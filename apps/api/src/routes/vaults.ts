@@ -127,7 +127,12 @@ vaultsRouter.post("/", async (req, res, next) => {
         thesis: thesis?.trim() || null,
       },
     });
-    await prisma.equityPoint.create({ data: { vaultId: created.id, t: nowSec(), v: 0 } });
+    const t0 = nowSec();
+    await prisma.equityPoint.upsert({
+      where: { vaultId_t: { vaultId: created.id, t: t0 } },
+      update: { v: 0 },
+      create: { vaultId: created.id, t: t0, v: 0 },
+    });
     const vault = await assembleVault(created.id);
     res.status(201).json({ vault });
   } catch (err) {
@@ -197,8 +202,10 @@ vaultsRouter.post("/:id/deposit", async (req, res, next) => {
           solBufferSol: { increment: sol },
         },
       }),
-      prisma.equityPoint.create({
-        data: { vaultId: dbVault.id, t: nowSec(), v: dbVault.tvlSol + sol },
+      prisma.equityPoint.upsert({
+        where: { vaultId_t: { vaultId: dbVault.id, t: nowSec() } },
+        update: { v: dbVault.tvlSol + sol },
+        create: { vaultId: dbVault.id, t: nowSec(), v: dbVault.tvlSol + sol },
       }),
     ]);
     const vault = await assembleVault(dbVault.id);
@@ -267,8 +274,10 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
             solBufferSol: { decrement: valueSol },
           },
         }),
-        prisma.equityPoint.create({
-          data: { vaultId: dbVault.id, t: now, v: Math.max(0, dbVault.tvlSol - valueSol) },
+        prisma.equityPoint.upsert({
+          where: { vaultId_t: { vaultId: dbVault.id, t: now } },
+          update: { v: Math.max(0, dbVault.tvlSol - valueSol) },
+          create: { vaultId: dbVault.id, t: now, v: Math.max(0, dbVault.tvlSol - valueSol) },
         }),
       ]);
       res.status(201).json({ mode: "instant", request: toWithdrawRequest(request) });

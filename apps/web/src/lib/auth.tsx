@@ -72,9 +72,8 @@ function DemoAuth({ children }: { children: ReactNode }) {
     () => ({
       ready: true,
       demo: true,
-      user: signedIn
-        ? { id: "demo-user", handle: "you", wallet: "DemoWa11etAddr355xxxxxxxxxxxxxxxxxxxxxxxxxx" }
-        : null,
+      // no fake wallet address — a real one arrives with Privy
+      user: signedIn ? { id: "demo-user", handle: "you" } : null,
       login: () => setSignedIn(true),
       logout: () => setSignedIn(false),
     }),

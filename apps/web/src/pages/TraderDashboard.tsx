@@ -102,14 +102,16 @@ export function TraderDashboard() {
               <EquityChart points={vault.equityCurve} height={180} />
             </div>
             <div className="panel panel-pad">
-              <div className="sectiontitle" style={{ marginTop: 0 }}>Risk limits</div>
+              <div className="sectiontitle" style={{ marginTop: 0 }}>
+                Risk limits <span className="pill neutral" style={{ marginLeft: 6 }}>program defaults — enforced on-chain after devnet deploy</span>
+              </div>
               <div className="kv"><span className="k">Max trade notional</span><span className="v">10% of TVL</span></div>
               <div className="kv"><span className="k">Max price impact</span><span className="v">3%</span></div>
               <div className="kv"><span className="k">Daily loss breaker</span><span className="v">−15% → auto-freeze</span></div>
-              <div className="kv"><span className="k">Kill switch</span><span className="v pos">armed · trades only</span></div>
+              <div className="kv"><span className="k">Kill switch</span><span className="v">trades only, never withdrawals</span></div>
               <p className="dimtx" style={{ fontSize: 12, marginBottom: 0 }}>
-                The risk layer disposes what the strategy proposes. Nothing here can ever block
-                depositor withdrawals.
+                These are the vault program's default parameters (programs/vault). They bind when
+                the program is live — the ledger demo doesn't enforce them, and this label says so.
               </p>
             </div>
           </div>
