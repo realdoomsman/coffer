@@ -60,7 +60,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/health"],
-  ["GET ", "/api/vaults?sort=&type="],
+  ["GET ", "/api/vaults?sort=&type=&mode="],
   ["GET ", "/api/vaults/:id"],
   ["POST", "/api/vaults"],
   ["POST", "/api/vaults/:id/deposit"],
@@ -82,7 +82,7 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/wallets/tracked"],
   ["POST", "/api/wallets/tracked"],
   ["POST", "/api/wallets/tracked/:address/scan?force=1"],
-  ["GET ", "/api/activity?limit=30"],
+  ["GET ", "/api/activity?limit=30&mode="],
   ["GET ", "/api/pooltrades/:mint"],
   ["POST", "/api/withdrawals/:id/execute"],
   ["GET ", "/api/meta"],

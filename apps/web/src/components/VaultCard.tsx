@@ -14,7 +14,10 @@ export function VaultCard({ vault }: { vault: Vault }) {
             {vault.trader.xVerified && <span title="X account linked">𝕏</span>}
           </div>
         </div>
-        <TypePill type={vault.type} />
+        <span style={{ display: "flex", gap: 5 }}>
+          {vault.mode === "paper" && <span className="pill paper">paper</span>}
+          <TypePill type={vault.type} />
+        </span>
       </div>
       <div className="metric-row">
         <div>

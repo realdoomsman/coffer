@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
+import { REAL_VAULT_WALL } from "../services/trading.js";
 import { assembleVault, toWithdrawRequest } from "../services/vaults.js";
 
 export const withdrawalsRouter = Router();
@@ -19,6 +20,11 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
     });
     if (!request) {
       res.status(404).json({ error: "withdraw request not found" });
+      return;
+    }
+    if (request.vault.mode === "real") {
+      // THE WALL: real-vault payouts are on-chain, never ledger entries
+      res.status(409).json(REAL_VAULT_WALL);
       return;
     }
     const now = nowSec();

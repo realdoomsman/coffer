@@ -21,8 +21,12 @@ export interface TraderTotals {
 
 export interface TraderView {
   trader: TraderProfile;
+  /** ALL their vaults — each carries `mode`, the client splits surfaces. */
   vaults: Vault[];
+  /** REAL vaults only — the main platform column. */
   totals: TraderTotals;
+  /** PAPER vaults only — the clearly-labeled sandbox column. */
+  paperTotals: TraderTotals;
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -30,6 +34,22 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 function round(v: number, digits = 1): number {
   const f = 10 ** digits;
   return Math.round(v * f) / f;
+}
+
+function totalsFor(
+  vaults: Vault[],
+  depositRows: { userId: string; vaultId: string }[],
+  trades30d: number,
+): TraderTotals {
+  const tvlSol = vaults.reduce((s, v) => s + v.tvlSol, 0);
+  const weighted =
+    tvlSol > 0 ? vaults.reduce((s, v) => s + v.stats.pnlPct30d * v.tvlSol, 0) / tvlSol : 0;
+  return {
+    tvlSol: round(tvlSol, 2),
+    depositors: new Set(depositRows.map((d) => d.userId)).size,
+    trades30d,
+    pnlPct30dWeighted: round(weighted, 1),
+  };
 }
 
 export async function getTraderView(handle: string): Promise<TraderView | undefined> {
@@ -42,20 +62,28 @@ export async function getTraderView(handle: string): Promise<TraderView | undefi
   });
   const vaultIds = vaultRows.map((v) => v.id);
 
-  const [vaults, depositRows, trades30d] = await Promise.all([
+  const [vaults, depositRows] = await Promise.all([
     vaultIds.length
       ? assembleVaults({ ids: vaultIds }, { curvePoints: 240 })
       : Promise.resolve([] as Vault[]),
     vaultIds.length
       ? prisma.deposit.findMany({
           where: { vaultId: { in: vaultIds } },
-          select: { userId: true },
+          select: { userId: true, vaultId: true },
         })
-      : Promise.resolve([] as { userId: string }[]),
-    vaultIds.length
-      ? prisma.trade.count({
-          where: { vaultId: { in: vaultIds }, ts: { gte: nowSec() - 30 * 86400 } },
-        })
+      : Promise.resolve([] as { userId: string; vaultId: string }[]),
+  ]);
+
+  // real/paper split — totals never mix the sandbox into the main column
+  const realIds = vaults.filter((v) => v.mode === "real").map((v) => v.id);
+  const paperIds = vaults.filter((v) => v.mode === "paper").map((v) => v.id);
+  const since = nowSec() - 30 * 86400;
+  const [realTrades30d, paperTrades30d] = await Promise.all([
+    realIds.length
+      ? prisma.trade.count({ where: { vaultId: { in: realIds }, ts: { gte: since } } })
+      : Promise.resolve(0),
+    paperIds.length
+      ? prisma.trade.count({ where: { vaultId: { in: paperIds }, ts: { gte: since } } })
       : Promise.resolve(0),
   ]);
 
@@ -63,18 +91,18 @@ export async function getTraderView(handle: string): Promise<TraderView | undefi
   // aggregated across ALL their vaults — reuse it rather than recompute.
   const trader = vaults[0]?.trader ?? toTraderProfile(user, []);
 
-  const tvlSol = vaults.reduce((s, v) => s + v.tvlSol, 0);
-  const weighted =
-    tvlSol > 0 ? vaults.reduce((s, v) => s + v.stats.pnlPct30d * v.tvlSol, 0) / tvlSol : 0;
-
   return {
     trader,
     vaults,
-    totals: {
-      tvlSol: round(tvlSol, 2),
-      depositors: new Set(depositRows.map((d) => d.userId)).size,
-      trades30d,
-      pnlPct30dWeighted: round(weighted, 1),
-    },
+    totals: totalsFor(
+      vaults.filter((v) => v.mode === "real"),
+      depositRows.filter((d) => realIds.includes(d.vaultId)),
+      realTrades30d,
+    ),
+    paperTotals: totalsFor(
+      vaults.filter((v) => v.mode === "paper"),
+      depositRows.filter((d) => paperIds.includes(d.vaultId)),
+      paperTrades30d,
+    ),
   };
 }

@@ -9,6 +9,7 @@ export function CreateVault() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [type, setType] = useState<"managed" | "mirror">(params.get("leader") ? "mirror" : "managed");
+  const [mode, setMode] = useState<"real" | "paper">("real");
   const [name, setName] = useState("");
   const [perfFee, setPerfFee] = useState(PERF_FEE_DEFAULT_BPS / 100);
   const [thesis, setThesis] = useState("");
@@ -24,6 +25,7 @@ export function CreateVault() {
       const v = await api.createVault({
         name: name.trim(),
         type,
+        mode,
         perfFeeBps: Math.round(perfFee * 100),
         thesis: thesis.trim() || undefined,
         leaderWallet: type === "mirror" ? leader.trim() : undefined,
@@ -47,6 +49,23 @@ export function CreateVault() {
 
       <div className="grid2">
         <form onSubmit={(e) => void submit(e)} className="panel panel-pad">
+          <div className="field">
+            <label>Money</label>
+            <div className="chipsrow">
+              <button type="button" className={`chip ${mode === "real" ? "on" : ""}`} onClick={() => setMode("real")}>
+                real SOL — the main platform
+              </button>
+              <button type="button" className={`chip ${mode === "paper" ? "on" : ""}`} onClick={() => setMode("paper")}>
+                paper — sandbox
+              </button>
+            </div>
+            <div className="hint">
+              {mode === "real"
+                ? "Publishes now; funding and trading activate at on-chain launch. Never simulated."
+                : "Trades instantly at live prices — ledger entries, clearly labeled, kept out of real records."}
+            </div>
+          </div>
+
           <div className="field">
             <label>Vault type</label>
             <div className="chipsrow">

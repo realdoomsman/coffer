@@ -3,6 +3,7 @@ import type { Order as DbOrder } from "@prisma/client";
 import { Router } from "express";
 import { prisma } from "../db.js";
 import { getTokenInfo } from "../services/prices.js";
+import { REAL_VAULT_WALL } from "../services/trading.js";
 
 export const ordersRouter = Router();
 
@@ -63,6 +64,11 @@ ordersRouter.post("/", async (req, res, next) => {
     const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
     if (!vault) {
       res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (vault.mode === "real") {
+      // THE WALL: orders fill through the simulated engine — paper only
+      res.status(409).json(REAL_VAULT_WALL);
       return;
     }
     if (vault.status !== "active") {

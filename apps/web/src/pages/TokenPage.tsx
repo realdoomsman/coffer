@@ -285,9 +285,10 @@ export function TokenPage() {
         )}
       </div>
 
-      {/* ── CTA ── */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <Link className="btn" to="/terminal">Trade in terminal</Link>
+      {/* ── CTA — carries this token straight into the chart ── */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+        <Link className="btn primary" to={`/paper?mint=${mint}`}>Paper trade it</Link>
+        <Link className="btn" to={`/terminal?mint=${mint}`}>Open in real terminal</Link>
         <Link className="btn ghost" to="/tracking">Track a wallet</Link>
       </div>
     </>

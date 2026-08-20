@@ -45,8 +45,27 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
     }
   }
 
+  if (vault.mode === "real") {
+    return (
+      <div className="panel panel-pad">
+        <div className="sectiontitle" style={{ marginTop: 0 }}>
+          Deposit <span className="pill real" style={{ marginLeft: 6 }}>real SOL</span>
+        </div>
+        <div className="callout">
+          This vault only ever moves real SOL on-chain — nothing here is simulated, so deposits
+          stay closed until launch. Unlocks in order: <strong>program deploy</strong> (devnet,
+          needs WSL) → <strong>Privy wallets</strong> → <strong>funding opens</strong>. The vault
+          page, thesis, and terms are live now so depositors can find it early.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel panel-pad">
+      <div className="sectiontitle" style={{ marginTop: 0 }}>
+        Deposit <span className="pill paper" style={{ marginLeft: 6 }}>paper</span>
+      </div>
       <div className="tradetabs">
         <button className={`buy ${tab === "deposit" ? "on" : ""}`} onClick={() => setTab("deposit")}>
           Deposit

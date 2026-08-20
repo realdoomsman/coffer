@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { TokenSearchBox } from "../components/TokenSearchBox";
 import {
   createChart,
   ColorType,
@@ -42,12 +44,23 @@ const ORDER_KINDS: { id: OrderKind; label: string; side: "sell" | "buy" }[] = [
   { id: "limit_buy_breakout", label: "Buy breakout", side: "buy" },
 ];
 
-export function Terminal() {
-  usePageTitle("Terminal");
+export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
+  usePageTitle(mode === "paper" ? "Paper terminal" : "Terminal");
+  const paper = mode === "paper";
   const toast = useToast();
 
-  const [mint, setMint] = useState(DEFAULT_MINT);
+  const [params] = useSearchParams();
+  const paramMint = params.get("mint");
+  const [mint, setMint] = useState(
+    paramMint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(paramMint) ? paramMint : DEFAULT_MINT,
+  );
+  // navigating here again with a different ?mint= swaps the chart
+  useEffect(() => {
+    if (paramMint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(paramMint)) setMint(paramMint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramMint]);
   const [tf, setTf] = useState<Tf>("5m");
+  const [rail, setRail] = useState<"trade" | "orders" | "dca">("trade");
   const [denom, setDenom] = useState<"usd" | "mcap">("usd");
   const [supplyUi, setSupplyUi] = useState<number | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
@@ -126,12 +139,12 @@ export function Terminal() {
   }, [mint]);
 
   useEffect(() => {
-    api.vaults().then((vs) => {
+    api.vaults({ mode }).then((vs) => {
       setVaults(vs);
       if (vs.length > 0 && !vaultId) setVaultId(vs[0]!.id);
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     if (!vaultId) return;
@@ -220,8 +233,13 @@ export function Terminal() {
         ? { type: "volume" }
         : { type: "price", precision: 9, minMove: 0.000000001 },
     });
+    // lightweight-charts requires STRICTLY ascending times — upstream
+    // candles can carry duplicate buckets, so sort + dedupe (last wins)
+    const clean = [...rawCandles.current]
+      .sort((a, b) => a.t - b.t)
+      .filter((c, i, arr) => i === arr.length - 1 || c.t !== arr[i + 1]!.t);
     series.setData(
-      rawCandles.current.map((c) => ({
+      clean.map((c) => ({
         time: c.t as UTCTimestamp,
         open: c.o * scale,
         high: c.h * scale,
@@ -229,19 +247,31 @@ export function Terminal() {
         close: c.c * scale,
       })),
     );
-    // your vault's fills painted on the candles — B below, S above
-    const first = rawCandles.current[0]?.t ?? 0;
+    // your vault's fills painted on the candles — same-second fills merge
+    // into one marker per timestamp (the strict-ordering rule again)
+    const first = clean[0]?.t ?? 0;
+    const byTs = new Map<number, { buys: number; sells: number }>();
+    for (const t of vaultTrades) {
+      if (t.mint !== mint || t.ts < first) continue;
+      const g = byTs.get(t.ts) ?? { buys: 0, sells: 0 };
+      if (t.side === "buy") g.buys++;
+      else g.sells++;
+      byTs.set(t.ts, g);
+    }
     series.setMarkers(
-      vaultTrades
-        .filter((t) => t.mint === mint && t.ts >= first)
-        .sort((a, b) => a.ts - b.ts)
-        .map((t) => ({
-          time: t.ts as UTCTimestamp,
-          position: t.side === "buy" ? ("belowBar" as const) : ("aboveBar" as const),
-          color: t.side === "buy" ? "#2fd980" : "#ff4f58",
-          shape: t.side === "buy" ? ("arrowUp" as const) : ("arrowDown" as const),
-          text: t.side === "buy" ? "B" : "S",
-        })),
+      [...byTs.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([ts, g]) => {
+          const mixed = g.buys > 0 && g.sells > 0;
+          const buy = g.buys > 0 && !mixed;
+          return {
+            time: ts as UTCTimestamp,
+            position: buy ? ("belowBar" as const) : ("aboveBar" as const),
+            color: mixed ? "#ffb000" : buy ? "#2fd980" : "#ff4f58",
+            shape: buy ? ("arrowUp" as const) : ("arrowDown" as const),
+            text: mixed ? "B/S" : buy ? (g.buys > 1 ? `B×${g.buys}` : "B") : g.sells > 1 ? `S×${g.sells}` : "S",
+          };
+        }),
     );
     chart.timeScale().fitContent();
   }, [candleVer, denom, supplyUi, vaultTrades, mint]);
@@ -325,13 +355,33 @@ export function Terminal() {
     <>
       <div className="pagehead">
         <div>
-          <h1>Terminal</h1>
+          <h1>{paper ? "Paper terminal" : "Terminal"}</h1>
           <div className="sub">
-            Live chart from on-chain pools · trades execute against your vault's ledger at live prices ·
-            on-chain execution arrives with the P1 program deploy.
+            {paper
+              ? "Sandbox — fills are ledger entries at live market prices, never on-chain. Records stay in the paper column, separate from real track records."
+              : "Real SOL only. Charts and prices are live; execution unlocks with the on-chain program."}
           </div>
         </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ width: 300 }}>
+            <TokenSearchBox
+              onPick={(r) => setMint(r.mint)}
+              placeholder="load a token into the chart…"
+            />
+          </div>
+          {paper && <span className="pill paper" style={{ fontSize: 12, padding: "5px 12px" }}>PAPER SANDBOX</span>}
+        </div>
       </div>
+
+      {!paper && (
+        <div className="callout" style={{ marginBottom: 14 }}>
+          <strong>Real execution is not live yet.</strong> This terminal never simulates — buttons
+          stay off until: program deploy (needs WSL + reboot) · Privy wallets (App ID in .env) ·
+          funded keeper. Want to practice meanwhile? The{" "}
+          <Link to="/paper">paper terminal</Link> runs the full engine at live prices, clearly
+          labeled.
+        </div>
+      )}
 
       {positions.length > 0 && (
         <div className="posbar">
@@ -482,7 +532,7 @@ export function Terminal() {
                           <button
                             className="btn ghost sm"
                             title="Sell exactly your initial cost — keep the rest as a free ride"
-                            disabled={busy || !vaultId || p.valueSol <= p.costSol}
+                            disabled={!paper || busy || !vaultId || p.valueSol <= p.costSol}
                             onClick={() => {
                               void (async () => {
                                 if (!vaultId) return;
@@ -511,7 +561,7 @@ export function Terminal() {
                               key={pct}
                               className="btn ghost sm"
                               style={{ marginLeft: 4 }}
-                              disabled={busy || !vaultId}
+                              disabled={!paper || busy || !vaultId}
                               onClick={() => {
                                 setMint(p.mint);
                                 void (async () => {
@@ -670,7 +720,15 @@ export function Terminal() {
             )}
           </div>
 
-          <div className="panel panel-pad">
+          <div className="viewtoggle" style={{ alignSelf: "stretch", display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
+            {(["trade", "orders", "dca"] as const).map((r) => (
+              <button key={r} className={rail === r ? "on" : ""} onClick={() => setRail(r)}>
+                {r === "trade" ? "Trade" : r === "orders" ? "Orders" : "DCA"}
+              </button>
+            ))}
+          </div>
+
+          <div className="panel panel-pad" style={{ display: rail === "trade" ? undefined : "none" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <span className="dimtx mono" style={{ fontSize: 9.5, letterSpacing: "0.16em" }}>PRESETS</span>
               <div className="viewtoggle">
@@ -712,6 +770,7 @@ export function Terminal() {
               className={`btn ${side}`}
               style={{ width: "100%" }}
               disabled={
+                !paper ||
                 busy ||
                 !vaultId ||
                 !info ||
@@ -720,9 +779,11 @@ export function Terminal() {
                 (side === "sell" && !heldPosition) ||
                 (side === "buy" && vault !== null && amountNum > vault.solBufferSol)
               }
+              title={paper ? undefined : "Real execution unlocks with the on-chain program"}
               onClick={() => void executeTrade()}
             >
               {busy ? "…" : side === "buy" ? `Buy ${info?.symbol ?? ""}` : `Sell ${info?.symbol ?? ""}`}
+              {paper ? " (paper)" : ""}
             </button>
             {side === "buy" && vault && amountNum > vault.solBufferSol && (
               <div className="dimtx" style={{ fontSize: 11.5, marginTop: 6 }}>
@@ -743,7 +804,7 @@ export function Terminal() {
             </div>
           </div>
 
-          <div className="panel panel-pad">
+          <div className="panel panel-pad" style={{ display: rail === "orders" ? undefined : "none" }}>
             <div className="sectiontitle" style={{ marginTop: 0 }}>Arm an order</div>
             <div className="field">
               <label>Type</label>
@@ -772,7 +833,7 @@ export function Terminal() {
               className="btn"
               style={{ width: "100%" }}
               disabled={
-                busy || !vaultId || !info || (parseFloat(trigger) || 0) <= 0 ||
+                !paper || busy || !vaultId || !info || (parseFloat(trigger) || 0) <= 0 ||
                 (kindMeta.side === "sell" && !heldPosition)
               }
               onClick={() => void placeOrder()}
@@ -785,7 +846,7 @@ export function Terminal() {
             </p>
           </div>
 
-          <div className="panel panel-pad">
+          <div className="panel panel-pad" style={{ display: rail === "dca" ? undefined : "none" }}>
             <div className="sectiontitle" style={{ marginTop: 0 }}>DCA — spread the entry</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
               <div className="field" style={{ marginBottom: 8 }}>
@@ -805,7 +866,7 @@ export function Terminal() {
               className="btn"
               style={{ width: "100%" }}
               disabled={
-                busy || !vaultId || !info || info.source === "none" ||
+                !paper || busy || !vaultId || !info || info.source === "none" ||
                 (parseFloat(dcaAmt) || 0) <= 0 || (parseInt(dcaLegs) || 0) < 1
               }
               onClick={() => {

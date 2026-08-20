@@ -58,8 +58,13 @@ export function Leaderboards() {
   usePageTitle("Leaderboards");
   const nav = useNavigate();
   const [board, setBoard] = useState<Board>("vaults");
+  const [mode, setMode] = useState<"real" | "paper">("real");
 
-  const { data: vaults, error: vaultsError } = usePoll<Vault[]>(() => api.vaults(), 30_000, []);
+  const { data: vaults, error: vaultsError } = usePoll<Vault[]>(
+    () => api.vaults({ mode }),
+    30_000,
+    [mode],
+  );
   const { data: wallets, error: walletsError } = usePoll<TrackedWallet[]>(() => api.trackedWallets(), 30_000, []);
 
   const rankedVaults = useMemo(
@@ -103,12 +108,24 @@ export function Leaderboards() {
             Every record here is recomputed from chain data — never self-reported. Refreshes 30s.
           </div>
         </div>
-        <div className="viewtoggle">
-          {BOARDS.map((b) => (
-            <button key={b.id} className={board === b.id ? "on" : ""} onClick={() => setBoard(b.id)}>
-              {b.label}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8 }}>
+          {board !== "wallets" && (
+            <div className="viewtoggle" title="Real records and paper records never mix">
+              <button className={mode === "real" ? "on" : ""} onClick={() => setMode("real")}>
+                Real
+              </button>
+              <button className={mode === "paper" ? "on" : ""} onClick={() => setMode("paper")}>
+                Paper
+              </button>
+            </div>
+          )}
+          <div className="viewtoggle">
+            {BOARDS.map((b) => (
+              <button key={b.id} className={board === b.id ? "on" : ""} onClick={() => setBoard(b.id)}>
+                {b.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

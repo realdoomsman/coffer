@@ -10,7 +10,8 @@ export function Landing() {
   const [vaults, setVaults] = useState<Vault[] | null>(null);
 
   useEffect(() => {
-    api.vaults().then(setVaults).catch(() => setVaults([]));
+    // the public pitch shows real vaults only — paper stays in its sandbox
+    api.vaults({ mode: "real" }).then(setVaults).catch(() => setVaults([]));
   }, []);
 
   const tvl = vaults?.reduce((s, v) => s + v.tvlSol, 0) ?? 0;

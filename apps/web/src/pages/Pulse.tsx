@@ -211,7 +211,8 @@ export function Pulse() {
     10_000,
     [],
   );
-  const { data: vaults } = usePoll<Vault[]>(() => api.vaults(), 60_000, []);
+  // quick buys are ledger fills → paper vaults only; real vaults never simulate
+  const { data: vaults } = usePoll<Vault[]>(() => api.vaults({ mode: "paper" }), 60_000, []);
   const quickVault =
     (vaultId && vaults?.find((v) => v.id === vaultId)) || vaults?.[0] || null;
 
@@ -243,7 +244,8 @@ export function Pulse() {
           <h1>Pulse</h1>
           <div className="sub">
             Live token lifecycle — hover a column to pause it. ⚡ buys the active preset from{" "}
-            {quickVault ? <strong>{quickVault.name}</strong> : "…"} instantly.
+            {quickVault ? <strong>{quickVault.name}</strong> : "…"}{" "}
+            <span className="pill paper">paper</span> — real vaults trade on-chain only.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

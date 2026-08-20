@@ -4,8 +4,13 @@
 // pre-rendered text lines (vault names uppercased — ticker-tape style).
 // Trades that were produced by a filled order render as "order_fill"
 // (joined via Order.filledTradeId), not as plain trades. Cached 5s.
+//
+// Real/paper split: events from PAPER vaults are prefixed "PAPER · "
+// server-side so no surface can pass sandbox activity off as real.
+// Real-vault lifecycle events (vault_created — the only kind a walled
+// real vault can produce) render unprefixed. ?mode= filters the feed.
 
-import type { ActivityEvent, TradeSide } from "@coffer/shared";
+import type { ActivityEvent, TradeSide, VaultMode } from "@coffer/shared";
 import { fmtSol } from "@coffer/shared";
 import { getOrSet } from "../cache.js";
 import { prisma } from "../db.js";
@@ -22,30 +27,35 @@ const ORDER_LABEL: Record<string, string> = {
 
 const sol = (v: number) => fmtSol(v, 1);
 const up = (s: string) => s.toUpperCase();
+/** Paper-vault events are labeled server-side; real events pass through. */
+const tag = (mode: string, text: string) => (mode === "paper" ? `PAPER · ${text}` : text);
 
-async function buildFeed(limit: number): Promise<ActivityEvent[]> {
+async function buildFeed(limit: number, mode?: VaultMode): Promise<ActivityEvent[]> {
+  const vaultFilter = mode ? { vault: { mode } } : {};
   const [filledOrders, deposits, withdrawals, vaults] = await Promise.all([
     prisma.order.findMany({
-      where: { status: "filled", filledTradeId: { not: null } },
+      where: { status: "filled", filledTradeId: { not: null }, ...vaultFilter },
       orderBy: [{ filledAt: "desc" }, { id: "desc" }],
       take: limit,
-      include: { vault: { select: { name: true } } },
+      include: { vault: { select: { name: true, mode: true } } },
     }),
     prisma.deposit.findMany({
+      where: { ...vaultFilter },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
-      include: { vault: { select: { name: true } } },
+      include: { vault: { select: { name: true, mode: true } } },
     }),
     prisma.withdrawRequest.findMany({
-      where: { status: { in: ["pending", "executable", "paid"] } },
+      where: { status: { in: ["pending", "executable", "paid"] }, ...vaultFilter },
       orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
       take: limit,
-      include: { vault: { select: { name: true } } },
+      include: { vault: { select: { name: true, mode: true } } },
     }),
     prisma.vault.findMany({
+      where: mode ? { mode } : {},
       orderBy: { createdAt: "desc" },
       take: limit,
-      select: { id: true, name: true, type: true, createdAt: true },
+      select: { id: true, name: true, type: true, mode: true, createdAt: true },
     }),
   ]);
 
@@ -58,9 +68,10 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       ? prisma.trade.findMany({ where: { id: { in: fillTradeIds } } })
       : Promise.resolve([]),
     prisma.trade.findMany({
+      where: { ...vaultFilter },
       orderBy: [{ ts: "desc" }, { id: "desc" }],
       take: limit + fillTradeIds.length, // room to drop the fill trades
-      include: { vault: { select: { name: true } } },
+      include: { vault: { select: { name: true, mode: true } } },
     }),
   ]);
   const fillTradeById = new Map(fillTrades.map((t) => [t.id, t]));
@@ -76,7 +87,7 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       kind: "trade",
       vaultId: t.vaultId,
       vaultName,
-      text: `${vaultName} ${t.side === "buy" ? "BOUGHT" : "SOLD"} ${sol(t.solAmount)} SOL OF ${up(t.symbol)}`,
+      text: tag(t.vault.mode, `${vaultName} ${t.side === "buy" ? "BOUGHT" : "SOLD"} ${sol(t.solAmount)} SOL OF ${up(t.symbol)}`),
       solAmount: t.solAmount,
       side: t.side as TradeSide,
     });
@@ -96,7 +107,7 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       kind: "order_fill",
       vaultId: o.vaultId,
       vaultName,
-      text: `${label} FILLED: ${up(o.symbol)}${amountText} (${vaultName})`,
+      text: tag(o.vault.mode, `${label} FILLED: ${up(o.symbol)}${amountText} (${vaultName})`),
       solAmount,
       side: isSell ? "sell" : "buy",
     });
@@ -110,7 +121,7 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       kind: "deposit",
       vaultId: d.vaultId,
       vaultName,
-      text: `DEPOSIT +${sol(d.costSol)} SOL INTO ${vaultName}`,
+      text: tag(d.vault.mode, `DEPOSIT +${sol(d.costSol)} SOL INTO ${vaultName}`),
       solAmount: d.costSol,
     });
   }
@@ -124,7 +135,7 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       kind: paid ? "withdraw_paid" : "withdraw_request",
       vaultId: w.vaultId,
       vaultName,
-      text: `${paid ? "WITHDRAW PAID" : "WITHDRAW REQUEST"} ${sol(w.valueAtRequestSol)} SOL FROM ${vaultName}`,
+      text: tag(w.vault.mode, `${paid ? "WITHDRAW PAID" : "WITHDRAW REQUEST"} ${sol(w.valueAtRequestSol)} SOL FROM ${vaultName}`),
       solAmount: w.valueAtRequestSol,
     });
   }
@@ -137,7 +148,8 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
       kind: "vault_created",
       vaultId: v.id,
       vaultName,
-      text: `VAULT CREATED: ${vaultName} (${up(v.type)})`,
+      // real-vault lifecycle stays clean; paper creations carry the label too
+      text: tag(v.mode, `VAULT CREATED: ${vaultName} (${up(v.type)})`),
     });
   }
 
@@ -145,8 +157,10 @@ async function buildFeed(limit: number): Promise<ActivityEvent[]> {
   return events.slice(0, limit);
 }
 
-/** Newest-first merged activity feed, cached 5s per limit. */
-export async function getActivity(limit: number): Promise<ActivityEvent[]> {
+/** Newest-first merged activity feed, cached 5s per (limit, mode). */
+export async function getActivity(limit: number, mode?: VaultMode): Promise<ActivityEvent[]> {
   const clamped = Math.max(1, Math.min(ACTIVITY_MAX_LIMIT, Math.floor(limit)));
-  return getOrSet(`activity:${clamped}`, ACTIVITY_TTL_MS, () => buildFeed(clamped));
+  return getOrSet(`activity:${clamped}:${mode ?? "all"}`, ACTIVITY_TTL_MS, () =>
+    buildFeed(clamped, mode),
+  );
 }

@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
-import type { TokenSearchResult } from "@coffer/shared";
 import { fmtUsd } from "@coffer/shared";
 import { useAuth } from "./lib/auth";
 import { api } from "./lib/api";
@@ -8,6 +7,7 @@ import { useFlash, usePoll } from "./lib/hooks";
 import { useWatchlist } from "./lib/watchlist";
 import { ActivityWire } from "./components/ActivityWire";
 import { DepositModal } from "./components/DepositModal";
+import { TokenSearchBox } from "./components/TokenSearchBox";
 
 const HOTKEYS: Record<string, string> = {
   e: "/explore",
@@ -19,6 +19,7 @@ const HOTKEYS: Record<string, string> = {
   w: "/tracking",
   l: "/leaderboards",
   m: "/settings/profile",
+  b: "/paper",
 };
 
 function Nav({ to, hotkey, label, end }: { to: string; hotkey: string; label: string; end?: boolean }) {
@@ -30,88 +31,53 @@ function Nav({ to, hotkey, label, end }: { to: string; hotkey: string; label: st
   );
 }
 
-function TokenSearch() {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<TokenSearchResult[] | null>(null);
-  const [open, setOpen] = useState(false);
-  const nav = useNavigate();
-  const boxRef = useRef<HTMLDivElement>(null);
-  const seq = useRef(0);
+const HOTKEY_HELP: { key: string; label: string }[] = [
+  { key: "E", label: "Explore vaults" },
+  { key: "P", label: "Portfolio" },
+  { key: "D", label: "Pulse — live token lifecycle" },
+  { key: "T", label: "Terminal (real SOL)" },
+  { key: "B", label: "Paper trading sandbox" },
+  { key: "V", label: "My vault dashboard" },
+  { key: "N", label: "Create a vault" },
+  { key: "M", label: "Edit my profile" },
+  { key: "W", label: "Wallet tracking" },
+  { key: "L", label: "Leaderboards" },
+  { key: "?", label: "This cheat sheet" },
+];
 
+function HotkeyHelp({ onClose }: { onClose: () => void }) {
   useEffect(() => {
-    const t = q.trim();
-    if (t.length < 2) {
-      setResults(null);
-      return;
-    }
-    const id = ++seq.current;
-    const timer = setTimeout(() => {
-      api
-        .searchTokens(t)
-        .then((r) => {
-          if (seq.current === id) {
-            setResults(r);
-            setOpen(true);
-          }
-        })
-        .catch(() => seq.current === id && setResults([]));
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [q]);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
     };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  function pick(r: TokenSearchResult) {
-    setOpen(false);
-    setQ("");
-    nav(`/token/${r.mint}`);
-  }
-
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
-    <div className="searchwrap" ref={boxRef}>
-      <form
-        className="search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const v = q.trim();
-          if (v.length >= 32 && v.length <= 44) nav(`/token/${v}`);
-          else if (results && results[0]) pick(results[0]);
-        }}
-      >
-        <span>⌕</span>
-        <input
-          placeholder="search tokens or paste a mint…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onFocus={() => results && setOpen(true)}
-          spellCheck={false}
-        />
-      </form>
-      {open && results && (
-        <div className="searchdrop">
-          {results.length === 0 && (
-            <div className="row" style={{ cursor: "default", color: "var(--dim)" }}>
-              no tokens found
-            </div>
-          )}
-          {results.slice(0, 8).map((r) => (
-            <button key={r.mint} type="button" className="row" onClick={() => pick(r)}>
-              {r.imageUrl ? <img src={r.imageUrl} alt="" /> : <span style={{ width: 20 }} />}
-              <span className="mono" style={{ fontWeight: 600 }}>{r.symbol}</span>
-              <span className="dimtx" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {r.name}
-              </span>
-              <span className="num mutedtx">{fmtUsd(r.priceUsd)}</span>
-            </button>
-          ))}
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(10,10,8,0.82)", display: "grid", placeItems: "center", zIndex: 95 }}
+      onClick={onClose}
+    >
+      <div className="panel" style={{ width: 400, maxWidth: "92vw", boxShadow: "10px 10px 0 rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts">
+        <div className="mono" style={{ padding: "12px 18px", borderBottom: "1px solid var(--line-2)", color: "var(--amber)", fontWeight: 700, letterSpacing: "0.1em" }}>
+          // KEYBOARD
         </div>
-      )}
+        <div style={{ padding: 16 }}>
+          {HOTKEY_HELP.map((h) => (
+            <div key={h.key} className="kv" style={{ alignItems: "center" }}>
+              <span className="k" style={{ textTransform: "none" }}>{h.label}</span>
+              <span className="v">
+                <span className="key" style={{ display: "inline-grid", placeItems: "center", width: 20, height: 20, border: "1px solid var(--line-bright)", fontSize: 11 }}>
+                  {h.key}
+                </span>
+              </span>
+            </div>
+          ))}
+          <p className="dimtx" style={{ fontSize: 11.5, marginBottom: 0 }}>
+            Keys work anywhere outside a text field. Esc closes panels.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -177,6 +143,7 @@ export default function App() {
   const { user, demo, login, logout } = useAuth();
   const [apiUp, setApiUp] = useState<boolean | null>(null);
   const [depositOpen, setDepositOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -184,6 +151,11 @@ export default function App() {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "?") {
+        e.preventDefault();
+        setHelpOpen((h) => !h);
+        return;
+      }
       const to = HOTKEYS[e.key.toLowerCase()];
       if (to) {
         e.preventDefault();
@@ -232,6 +204,9 @@ export default function App() {
         <Nav to="/tracking" hotkey="w" label="Wallet tracking" />
         <Nav to="/leaderboards" hotkey="l" label="Leaderboards" />
 
+        <div className="navsec">Sandbox</div>
+        <Nav to="/paper" hotkey="b" label="Paper trading" />
+
         <div className="spacer" />
         <div className="acctbox">
           <div className="avatar">{user ? user.handle.slice(0, 1).toUpperCase() : "·"}</div>
@@ -250,10 +225,11 @@ export default function App() {
         </div>
       </aside>
       {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} />}
+      {helpOpen && <HotkeyHelp onClose={() => setHelpOpen(false)} />}
 
       <div className="main">
         <div className="topbar">
-          <TokenSearch />
+          <TokenSearchBox onPick={(r) => nav(`/token/${r.mint}`)} />
           <WatchPill />
           <div className="spacer" />
           <SolPrice />
@@ -265,6 +241,14 @@ export default function App() {
             <span className="dot" />
             devnet
           </div>
+          <button
+            className="btn ghost sm"
+            style={{ padding: "3px 9px" }}
+            title="Keyboard shortcuts"
+            onClick={() => setHelpOpen(true)}
+          >
+            ?
+          </button>
         </div>
         <div className="content">
           <div className="content-inner">

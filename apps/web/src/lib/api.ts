@@ -61,10 +61,11 @@ export interface PortfolioView {
 }
 
 export const api = {
-  vaults: async (params?: { type?: string; sort?: string }) => {
+  vaults: async (params?: { type?: string; sort?: string; mode?: "real" | "paper" }) => {
     const q = new URLSearchParams();
     if (params?.type && params.type !== "all") q.set("type", params.type);
     if (params?.sort) q.set("sort", params.sort);
+    if (params?.mode) q.set("mode", params.mode);
     const qs = q.toString();
     const r = await get<{ vaults: Vault[] }>(`/vaults${qs ? `?${qs}` : ""}`);
     return r.vaults;
@@ -73,6 +74,7 @@ export const api = {
   createVault: async (body: {
     name: string;
     type: string;
+    mode?: "real" | "paper";
     perfFeeBps: number;
     thesis?: string;
     leaderWallet?: string;

@@ -13,13 +13,35 @@ import { prisma } from "../db.js";
 import { getTokenInfo } from "./prices.js";
 import { assembleVault, toPosition, toTrade } from "./vaults.js";
 
-/** Thrown for every rejected trade — routes map status → HTTP code. */
+/** Thrown for every rejected trade — routes map status → HTTP code.
+ *  `body` (when set) is the exact JSON the route must respond with;
+ *  otherwise routes respond { error: message }. */
 export class TradeError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly body?: Record<string, unknown>;
+  constructor(status: number, message: string, body?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.body = body;
   }
+}
+
+// ── THE WALL ────────────────────────────────────────────────────────
+// Real vaults hold real SOL and only ever execute on-chain. Until the
+// program is deployed (WSL), Privy wallets exist and the keeper is
+// funded, EVERY ledger operation against a real vault is rejected with
+// this exact shape — real vaults never touch the simulated engine.
+export const REAL_VAULT_WALL = {
+  error:
+    "real vaults execute on-chain only — pending: program deploy (WSL), Privy wallets, funded keeper",
+  pending: ["program_deploy", "privy_wallets"],
+} as const;
+
+export function realVaultWallError(): TradeError {
+  return new TradeError(409, REAL_VAULT_WALL.error, {
+    error: REAL_VAULT_WALL.error,
+    pending: [...REAL_VAULT_WALL.pending],
+  });
 }
 
 export interface TradeInput {
@@ -64,6 +86,9 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
 
   const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
   if (!vault) throw new TradeError(404, "vault not found");
+  // THE WALL: real vaults never execute simulated fills — not from the
+  // trade route, not from the order engine, not from DCA legs.
+  if (vault.mode === "real") throw realVaultWallError();
   if (vault.status !== "active") throw new TradeError(409, `vault is ${vault.status}`);
 
   // Live mark only — a fabricated price would fabricate pnl.

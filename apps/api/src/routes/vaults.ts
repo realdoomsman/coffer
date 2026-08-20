@@ -3,11 +3,12 @@ import {
   PERF_FEE_MAX_BPS,
   PERF_FEE_MIN_BPS,
   type Vault,
+  type VaultMode,
   type VaultType,
 } from "@coffer/shared";
 import { Router } from "express";
 import { prisma } from "../db.js";
-import { executeTrade, TradeError } from "../services/trading.js";
+import { executeTrade, REAL_VAULT_WALL, TradeError } from "../services/trading.js";
 import {
   assembleVault,
   assembleVaults,
@@ -32,12 +33,18 @@ const SORTERS: Record<SortKey, (a: Vault, b: Vault) => number> = {
   sharePrice: (a, b) => b.sharePriceSol - a.sharePriceSol,
 };
 
-// GET /api/vaults?sort=tvl|pnl7d|pnl30d|pnlAll|age|sharePrice&type=managed|mirror
+// GET /api/vaults?sort=tvl|pnl7d|pnl30d|pnlAll|age|sharePrice&type=managed|mirror&mode=real|paper
+// No mode param = ALL vaults — the web filters per surface.
 vaultsRouter.get("/", async (req, res, next) => {
   try {
     const type = req.query.type as VaultType | undefined;
     if (type !== undefined && type !== "managed" && type !== "mirror") {
       res.status(400).json({ error: 'type must be "managed" or "mirror"' });
+      return;
+    }
+    const mode = req.query.mode as VaultMode | undefined;
+    if (mode !== undefined && mode !== "real" && mode !== "paper") {
+      res.status(400).json({ error: 'mode must be "real" or "paper"' });
       return;
     }
     const sortKey = (req.query.sort as SortKey | undefined) ?? "tvl";
@@ -47,7 +54,7 @@ vaultsRouter.get("/", async (req, res, next) => {
       return;
     }
     // List views get a downsampled curve (sparkline density).
-    const vaults = await assembleVaults({ type }, { curvePoints: 240 });
+    const vaults = await assembleVaults({ type, mode }, { curvePoints: 240 });
     vaults.sort(sorter);
     res.json({ vaults });
   } catch (err) {
@@ -83,12 +90,16 @@ vaultsRouter.get("/:id", async (req, res, next) => {
   }
 });
 
-// POST /api/vaults — create a vault (demo user becomes the trader)
+// POST /api/vaults — create a vault (demo user becomes the trader).
+// mode defaults to "real" when omitted: the MAIN platform is real SOL.
+// Creating a real vault is just a DB row — its on-chain init is pending,
+// and every ledger operation against it is walled until the program ships.
 vaultsRouter.post("/", async (req, res, next) => {
   try {
-    const { name, type, perfFeeBps, thesis, leaderWallet } = (req.body ?? {}) as {
+    const { name, type, mode, perfFeeBps, thesis, leaderWallet } = (req.body ?? {}) as {
       name?: string;
       type?: string;
+      mode?: string;
       perfFeeBps?: number;
       thesis?: string;
       leaderWallet?: string;
@@ -99,6 +110,11 @@ vaultsRouter.post("/", async (req, res, next) => {
     }
     if (type !== "managed" && type !== "mirror") {
       res.status(400).json({ error: 'type must be "managed" or "mirror"' });
+      return;
+    }
+    const vaultMode: VaultMode = mode === undefined ? "real" : (mode as VaultMode);
+    if (vaultMode !== "real" && vaultMode !== "paper") {
+      res.status(400).json({ error: 'mode must be "real" or "paper"' });
       return;
     }
     if (type === "mirror" && !leaderWallet) {
@@ -114,6 +130,7 @@ vaultsRouter.post("/", async (req, res, next) => {
       data: {
         name: name.trim(),
         type,
+        mode: vaultMode,
         status: "active",
         traderId: trader.id,
         leaderWallet: type === "mirror" ? leaderWallet : null,
@@ -162,7 +179,8 @@ vaultsRouter.post("/:id/trade", async (req, res, next) => {
     res.status(201).json(result);
   } catch (err) {
     if (err instanceof TradeError) {
-      res.status(err.status).json({ error: err.message });
+      // err.body carries exact wire shapes (e.g. the real-vault wall)
+      res.status(err.status).json(err.body ?? { error: err.message });
       return;
     }
     next(err);
@@ -181,6 +199,11 @@ vaultsRouter.post("/:id/deposit", async (req, res, next) => {
     const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
     if (!dbVault) {
       res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (dbVault.mode === "real") {
+      // THE WALL: real-vault deposits are on-chain transfers, not ledger rows
+      res.status(409).json(REAL_VAULT_WALL);
       return;
     }
     if (dbVault.status !== "active") {
@@ -228,6 +251,11 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
     const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
     if (!dbVault) {
       res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (dbVault.mode === "real") {
+      // THE WALL: real-vault withdrawals (instant AND windowed) are on-chain
+      res.status(409).json(REAL_VAULT_WALL);
       return;
     }
     const user = await getDemoUser();

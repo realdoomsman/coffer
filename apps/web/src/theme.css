@@ -131,16 +131,21 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: 0.01em; text-transform
   position: relative; z-index: 30;
 }
 .searchwrap { position: relative; flex: 0 1 440px; }
-.topbar .search {
+.search {
   display: flex; align-items: center; gap: 9px;
   background: var(--ink); border: 1px solid var(--line-2);
   padding: 6px 12px; color: var(--dim);
 }
-.topbar .search:focus-within { border-color: var(--amber); }
-.topbar .search input {
+.search:focus-within { border-color: var(--amber); }
+.topbar .search input, .search input {
   flex: 1; background: none; border: none; outline: none; font-size: 12.5px;
-  font-family: var(--mono); min-width: 0;
+  font-family: var(--mono); min-width: 0; color: var(--text);
 }
+.search .key-hint {
+  font-size: 10px; color: var(--dim); border: 1px solid var(--line-2);
+  padding: 0 5px; flex-shrink: 0;
+}
+.field input[type="number"] { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .searchdrop {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
   background: var(--paper); border: 1px solid var(--line-bright);
@@ -181,6 +186,8 @@ h1, h2, h3 { font-family: var(--display); letter-spacing: 0.01em; text-transform
 }
 .pill.managed { color: var(--blue); background: var(--blue-dim); }
 .pill.mirror { color: var(--amber); background: var(--amber-dim); }
+.pill.real { color: var(--green); background: var(--green-dim); }
+.pill.paper { color: var(--amber); background: var(--amber-dim); border-style: dashed; }
 .pill.active { color: var(--green); background: var(--green-dim); }
 .pill.frozen { color: var(--red); background: var(--red-dim); }
 .pill.neutral { color: var(--muted); background: var(--panel-3); }

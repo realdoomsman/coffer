@@ -10,6 +10,7 @@ import type {
   TraderProfile,
   TraderStats,
   Vault,
+  VaultMode,
   VaultStats,
   VaultType,
   WithdrawRequest,
@@ -235,13 +236,14 @@ function computeStats(
  * vaults when omitted). Batches every query — no per-vault round trips.
  */
 export async function assembleVaults(
-  filter: { ids?: string[]; type?: VaultType } = {},
+  filter: { ids?: string[]; type?: VaultType; mode?: VaultMode } = {},
   options: AssembleOptions = {},
 ): Promise<Vault[]> {
   const vaults = await prisma.vault.findMany({
     where: {
       ...(filter.ids ? { id: { in: filter.ids } } : {}),
       ...(filter.type ? { type: filter.type } : {}),
+      ...(filter.mode ? { mode: filter.mode } : {}),
     },
     include: { trader: true },
     orderBy: { createdAt: "asc" },
@@ -312,6 +314,7 @@ export async function assembleVaults(
       id: v.id,
       name: v.name,
       type: v.type as VaultType,
+      mode: v.mode as VaultMode,
       status: v.status as Vault["status"],
       trader: toTraderProfile(v.trader, tradesByTrader.get(v.traderId) ?? []),
       leaderWallet: v.leaderWallet ?? undefined,

@@ -65,6 +65,7 @@ export function TraderDashboard() {
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
+            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "real sol" : "paper"}</span>
             <TypePill type={vault.type} />
             <StatusPill status={vault.status} />
             <span className="dimtx mono" style={{ fontSize: 12 }}>
@@ -72,7 +73,9 @@ export function TraderDashboard() {
             </span>
             <div style={{ flex: 1 }} />
             <Link to={`/vault/${vault.id}`} className="btn ghost sm">Public page ↗</Link>
-            <Link to="/terminal" className="btn primary sm">Open terminal</Link>
+            <Link to={vault.mode === "paper" ? "/paper" : "/terminal"} className="btn primary sm">
+              Open {vault.mode === "paper" ? "paper " : ""}terminal
+            </Link>
           </div>
 
           <div className="statrow" style={{ marginBottom: 16 }}>

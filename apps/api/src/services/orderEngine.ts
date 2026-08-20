@@ -75,7 +75,11 @@ async function orderTick(): Promise<void> {
   if (orderTickRunning) return; // previous tick still in flight
   orderTickRunning = true;
   try {
-    const open = await prisma.order.findMany({ where: { status: "open" } });
+    // paper vaults only — real vaults can't create orders, but the engine
+    // never touches them regardless (defense in depth for the wall)
+    const open = await prisma.order.findMany({
+      where: { status: "open", vault: { mode: "paper" } },
+    });
     if (open.length === 0) return;
 
     const mints = [...new Set(open.map((o) => o.mint))];
@@ -139,8 +143,9 @@ async function dcaTick(): Promise<void> {
   dcaTickRunning = true;
   try {
     const now = nowSec();
+    // paper vaults only (defensive — real vaults can't create DCAs)
     const due = await prisma.dcaOrder.findMany({
-      where: { status: "active", nextLegAt: { lte: now } },
+      where: { status: "active", nextLegAt: { lte: now }, vault: { mode: "paper" } },
     });
 
     for (const dca of due) {
@@ -204,7 +209,9 @@ async function revalTick(): Promise<void> {
   if (revalTickRunning) return;
   revalTickRunning = true;
   try {
-    const positions = await prisma.position.findMany();
+    // paper vaults only — a real vault's marks come from chain state, never
+    // from this simulated revaluation loop
+    const positions = await prisma.position.findMany({ where: { vault: { mode: "paper" } } });
     const mints = [...new Set(positions.map((p) => p.mint))];
     const infos = mints.length > 0 ? await getTokenInfos(mints) : [];
     const byMint = new Map<string, TokenInfo>(infos.map((i) => [i.mint, i]));
@@ -233,7 +240,10 @@ async function revalTick(): Promise<void> {
 
     // vault tvl = buffer + Σ live position marks (+ equity point if stale)
     const [vaults, sums] = await Promise.all([
-      prisma.vault.findMany({ select: { id: true, solBufferSol: true } }),
+      prisma.vault.findMany({
+        where: { mode: "paper" },
+        select: { id: true, solBufferSol: true },
+      }),
       prisma.position.groupBy({ by: ["vaultId"], _sum: { valueSol: true } }),
     ]);
     const sumByVault = new Map(sums.map((s) => [s.vaultId, s._sum.valueSol ?? 0]));

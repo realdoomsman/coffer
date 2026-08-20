@@ -5,6 +5,13 @@
 
 export type VaultType = "managed" | "mirror";
 export type VaultStatus = "active" | "frozen" | "closed";
+/**
+ * The hard wall: "real" vaults hold real SOL and only ever execute
+ * on-chain (blocked until the program is deployed — never simulated).
+ * "paper" vaults live in the ledger sandbox, clearly labeled, and their
+ * records feed the SEPARATE paper column of trader profiles.
+ */
+export type VaultMode = "real" | "paper";
 export type TradeSide = "buy" | "sell";
 export type WithdrawStatus = "pending" | "executable" | "paid" | "cancelled";
 
@@ -67,6 +74,7 @@ export interface Vault {
   id: string;
   name: string;
   type: VaultType;
+  mode: VaultMode;
   status: VaultStatus;
   trader: TraderProfile;
   /** mirror vaults: the leader wallet being copied */

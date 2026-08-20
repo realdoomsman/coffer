@@ -38,6 +38,11 @@ model Vault {
   id               String   @id @default(cuid())
   name             String
   type             String // "managed" | "mirror"
+  // "real" = on-chain SOL only (execution blocked until the program is
+  // deployed — NEVER simulated). "paper" = the ledger sandbox engine.
+  // Existing rows predate the split and were always ledger entries, so
+  // the default correctly classifies them as paper.
+  mode             String   @default("paper") // "real" | "paper"
   status           String   @default("active") // "active" | "frozen" | "closed"
   traderId         String
   trader           User     @relation(fields: [traderId], references: [id])
@@ -63,6 +68,7 @@ model Vault {
 
   @@index([traderId])
   @@index([type, status])
+  @@index([mode])
 }
 
 model EquityPoint {
