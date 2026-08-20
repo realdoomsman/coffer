@@ -117,7 +117,12 @@ export function Portfolio() {
     setBusy(id);
     try {
       const r = await api.executeWithdrawal(id);
-      toast("good", `Withdrawal paid: ${fmtSol(r.paidSol)} ◎ (worse-of rule applied)`);
+      toast(
+        "good",
+        r.fees && r.fees.profitSol > 0
+          ? `Paid ${fmtSol(r.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)} split 70/20/10 (trader ${fmtSol(r.fees.traderFeeSol)}, platform ${fmtSol(r.fees.platformFeeSol)})`
+          : `Withdrawal paid: ${fmtSol(r.paidSol)} ◎ (worse-of rule, no profit → no fees)`,
+      );
       const fresh = await api.portfolio();
       setData(fresh);
     } catch (e) {

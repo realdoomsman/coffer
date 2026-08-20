@@ -130,6 +130,12 @@ export function VaultPage() {
             <div className="kv"><span className="k">Redeem window</span><span className="v">{vault.redeemWindowHours}h</span></div>
             <div className="kv"><span className="k">Manager stake</span><span className="v">{fmtSol(vault.managerStakeSol)} ◎ ({vault.managerStakePct.toFixed(1)}%)</span></div>
             <div className="kv"><span className="k">SOL buffer</span><span className="v">{fmtSol(vault.solBufferSol)} ◎</span></div>
+            <div className="kv">
+              <span className="k">Fees crystallized</span>
+              <span className="v" title="Charged only on realized profit above each depositor's cost basis">
+                trader {fmtSol(vault.traderFeesAccruedSol)} ◎ · buyback {fmtSol(vault.platformFeesAccruedSol)} ◎
+              </span>
+            </div>
           </div>
 
           <div className="panel panel-pad">

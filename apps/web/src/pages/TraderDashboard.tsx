@@ -84,6 +84,12 @@ export function TraderDashboard() {
             <Stat k="Your stake" v={`${fmtSol(vault.managerStakeSol)} ◎`} d={`${vault.managerStakePct.toFixed(1)}% of TVL`} />
             <Stat k="SOL buffer" v={`${fmtSol(vault.solBufferSol)} ◎`} d="covers instant exits" />
             <Stat
+              k="Fees earned"
+              v={`${fmtSol(vault.traderFeesAccruedSol)} ◎`}
+              d="perf fee on realized profit"
+              tone={vault.traderFeesAccruedSol > 0 ? "pos" : undefined}
+            />
+            <Stat
               k="Pending withdrawals"
               v={`${fmtSol(pendingOut)} ◎`}
               d={pendingOut > vault.solBufferSol ? "unwind needed" : "buffer covers it"}

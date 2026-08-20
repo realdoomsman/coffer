@@ -89,6 +89,10 @@ export interface Vault {
   redeemWindowHours: number;
   /** SOL held unallocated — instant withdrawals draw from this */
   solBufferSol: number;
+  /** crystallized on exits, held outside tvl: trader perf fees */
+  traderFeesAccruedSol: number;
+  /** crystallized on exits, held outside tvl: platform cut (buyback sink) */
+  platformFeesAccruedSol: number;
   thesis?: string;
   stats: VaultStats;
   equityCurve: EquityPoint[];
@@ -135,6 +139,20 @@ export interface WithdrawRequest {
   requestedAt: number;
   executableAt: number;
   status: WithdrawStatus;
+}
+
+/**
+ * Fee crystallization on exit (the 70/20/10 money flow). Profit is
+ * per-portion: gross proceeds minus the proportional cost basis of the
+ * shares being burned. No profit → no fees, ever.
+ */
+export interface FeeBreakdown {
+  grossSol: number;
+  costBasisSol: number;
+  profitSol: number;
+  traderFeeSol: number;
+  platformFeeSol: number;
+  paidSol: number;
 }
 
 export interface Holding {

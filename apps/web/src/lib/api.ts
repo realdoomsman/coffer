@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   Candle,
+  FeeBreakdown,
   Holding,
   Order,
   OrderKind,
@@ -90,11 +91,12 @@ export const api = {
     return { shares: r.deposit.shares, vault: r.vault };
   },
   withdraw: async (vaultId: string, shares: number) => {
-    const r = await post<{ mode: "instant" | "windowed"; request: WithdrawRequest }>(
-      `/vaults/${vaultId}/withdraw`,
-      { shares },
-    );
-    return { instant: r.mode === "instant", request: r.request };
+    const r = await post<{
+      mode: "instant" | "windowed";
+      request: WithdrawRequest;
+      fees?: FeeBreakdown;
+    }>(`/vaults/${vaultId}/withdraw`, { shares });
+    return { instant: r.mode === "instant", request: r.request, fees: r.fees };
   },
   token: (mint: string) => get<TokenInfo>(`/tokens/${mint}`),
   portfolio: async (): Promise<PortfolioView> => {
@@ -171,7 +173,7 @@ export const api = {
     return r.trades;
   },
   executeWithdrawal: (id: string) =>
-    post<{ request: WithdrawRequest; paidSol: number; vault: Vault }>(
+    post<{ request: WithdrawRequest; paidSol: number; fees: FeeBreakdown; vault: Vault }>(
       `/withdrawals/${id}/execute`,
       {},
     ),

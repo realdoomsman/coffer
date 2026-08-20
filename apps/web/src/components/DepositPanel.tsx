@@ -29,10 +29,17 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
         const r = await api.withdraw(vault.id, shares);
         setMsg(
           r.instant
-            ? { tone: "green", text: `Instant withdrawal paid from SOL buffer` }
+            ? {
+                tone: "green",
+                text: r.fees
+                  ? r.fees.profitSol > 0
+                    ? `Paid ${fmtSol(r.fees.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)} split: trader ${fmtSol(r.fees.traderFeeSol)}, platform ${fmtSol(r.fees.platformFeeSol)}`
+                    : `Paid ${fmtSol(r.fees.paidSol)} ◎ — no profit above your cost basis, so zero fees`
+                  : `Instant withdrawal paid from SOL buffer`,
+              }
             : {
                 tone: "",
-                text: `Withdrawal requested — executable after the ${vault.redeemWindowHours}h window at worse-of pricing`,
+                text: `Withdrawal requested — executes after the ${vault.redeemWindowHours}h window at worse-of pricing; the 70/20/10 split applies to profit at execution`,
               },
         );
       }

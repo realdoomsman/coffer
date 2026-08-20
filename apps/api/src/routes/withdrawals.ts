@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
+import { crystallize } from "../services/fees.js";
 import { REAL_VAULT_WALL } from "../services/trading.js";
 import { assembleVault, toWithdrawRequest } from "../services/vaults.js";
 
@@ -40,29 +41,57 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
     }
 
     const vault = request.vault;
-    const paidSol = Math.min(request.valueAtRequestSol, request.shares * vault.sharePriceSol);
-    if (vault.solBufferSol + EPS < paidSol) {
+    // worse-of rule: gross proceeds are the lesser of request-time and
+    // execution-time value of the shares
+    const grossSol = Math.min(request.valueAtRequestSol, request.shares * vault.sharePriceSol);
+    if (vault.solBufferSol + EPS < grossSol) {
       res.status(409).json({ error: "vault buffer insufficient — trader must unwind" });
       return;
     }
 
+    const depositor = await prisma.vaultDepositor.findUnique({
+      where: { vaultId_userId: { vaultId: vault.id, userId: request.userId } },
+    });
+    // crystallize the 70/20/10 split against this portion's cost basis
+    const fees = crystallize({
+      grossSol,
+      positionCostSol: depositor?.costSol ?? grossSol,
+      shares: request.shares,
+      positionShares: depositor?.shares ?? request.shares,
+      perfFeeBps: vault.perfFeeBps,
+    });
+
     // worse-of payouts can pay below fair value — the difference accrues to
     // remaining holders, so recompute per-share value after the exit
     const newShares = Math.max(0, vault.totalShares - request.shares);
-    const newTvl = Math.max(0, vault.tvlSol - paidSol);
+    const newTvl = Math.max(0, vault.tvlSol - grossSol);
     const newSharePrice = newShares > 0 ? newTvl / newShares : 1;
     const [updated] = await prisma.$transaction([
       prisma.withdrawRequest.update({
         where: { id: request.id },
         data: { status: "paid", paidAt: now },
       }),
+      ...(depositor
+        ? [
+            prisma.vaultDepositor.update({
+              where: { id: depositor.id },
+              data: {
+                shares: { decrement: Math.min(depositor.shares, request.shares) },
+                costSol: { decrement: fees.costBasisSol },
+                cumulativeTraderFeeSol: { increment: fees.traderFeeSol },
+              },
+            }),
+          ]
+        : []),
       prisma.vault.update({
         where: { id: vault.id },
         data: {
           tvlSol: newTvl,
           totalShares: newShares,
-          solBufferSol: { decrement: paidSol },
+          solBufferSol: { decrement: grossSol },
           sharePriceSol: newSharePrice,
+          traderFeesAccruedSol: { increment: fees.traderFeeSol },
+          platformFeesAccruedSol: { increment: fees.platformFeeSol },
         },
       }),
       prisma.equityPoint.upsert({
@@ -73,7 +102,7 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
     ]);
 
     const assembled = await assembleVault(vault.id);
-    res.json({ request: toWithdrawRequest(updated), paidSol, vault: assembled });
+    res.json({ request: toWithdrawRequest(updated), paidSol: fees.paidSol, fees, vault: assembled });
   } catch (err) {
     next(err);
   }

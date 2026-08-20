@@ -8,6 +8,7 @@ import {
 } from "@coffer/shared";
 import { Router } from "express";
 import { prisma } from "../db.js";
+import { crystallize } from "../services/fees.js";
 import { executeTrade, REAL_VAULT_WALL, TradeError } from "../services/trading.js";
 import {
   assembleVault,
@@ -218,6 +219,12 @@ vaultsRouter.post("/:id/deposit", async (req, res, next) => {
       prisma.deposit.create({
         data: { vaultId: dbVault.id, userId: user.id, shares, costSol: sol },
       }),
+      // per-depositor ledger — the cost basis fees crystallize against
+      prisma.vaultDepositor.upsert({
+        where: { vaultId_userId: { vaultId: dbVault.id, userId: user.id } },
+        update: { shares: { increment: shares }, costSol: { increment: sol } },
+        create: { vaultId: dbVault.id, userId: user.id, shares, costSol: sol },
+      }),
       prisma.vault.update({
         where: { id: dbVault.id },
         data: {
@@ -263,20 +270,24 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
     }
     const user = await getDemoUser();
 
-    // held = deposited − already withdrawn/withdrawing
-    const [deposits, priorWithdrawals] = await Promise.all([
-      prisma.deposit.aggregate({
-        where: { vaultId: dbVault.id, userId: user.id },
-        _sum: { shares: true },
+    // held/basis come from the per-depositor ledger; pending (unexecuted)
+    // requests still reserve their shares
+    const [depositor, pendingReqs] = await Promise.all([
+      prisma.vaultDepositor.findUnique({
+        where: { vaultId_userId: { vaultId: dbVault.id, userId: user.id } },
       }),
       prisma.withdrawRequest.aggregate({
-        where: { vaultId: dbVault.id, userId: user.id, status: { not: "cancelled" } },
+        where: {
+          vaultId: dbVault.id,
+          userId: user.id,
+          status: { in: ["pending", "executable"] },
+        },
         _sum: { shares: true },
       }),
     ]);
-    const held = (deposits._sum.shares ?? 0) - (priorWithdrawals._sum.shares ?? 0);
-    if (shares > held + 1e-9) {
-      res.status(400).json({ error: `insufficient shares (held: ${held.toFixed(4)})` });
+    const held = (depositor?.shares ?? 0) - (pendingReqs._sum.shares ?? 0);
+    if (!depositor || shares > held + 1e-9) {
+      res.status(400).json({ error: `insufficient shares (held: ${Math.max(0, held).toFixed(4)})` });
       return;
     }
 
@@ -285,6 +296,14 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
     const now = nowSec();
 
     if (instant) {
+      // crystallize the 70/20/10 split against this portion's cost basis
+      const fees = crystallize({
+        grossSol: valueSol,
+        positionCostSol: depositor.costSol,
+        shares,
+        positionShares: depositor.shares,
+        perfFeeBps: dbVault.perfFeeBps,
+      });
       const [request] = await prisma.$transaction([
         prisma.withdrawRequest.create({
           data: {
@@ -297,12 +316,24 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
             status: "paid",
           },
         }),
+        prisma.vaultDepositor.update({
+          where: { id: depositor.id },
+          data: {
+            shares: { decrement: shares },
+            costSol: { decrement: fees.costBasisSol },
+            cumulativeTraderFeeSol: { increment: fees.traderFeeSol },
+          },
+        }),
         prisma.vault.update({
           where: { id: dbVault.id },
           data: {
+            // gross leaves depositor equity; fees move from the buffer
+            // into the accrual buckets (owed, outside tvl)
             tvlSol: { decrement: valueSol },
             totalShares: { decrement: shares },
             solBufferSol: { decrement: valueSol },
+            traderFeesAccruedSol: { increment: fees.traderFeeSol },
+            platformFeesAccruedSol: { increment: fees.platformFeeSol },
           },
         }),
         // a fair-priced withdrawal leaves per-share value unchanged
@@ -312,11 +343,12 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
           create: { vaultId: dbVault.id, t: now, v: dbVault.sharePriceSol },
         }),
       ]);
-      res.status(201).json({ mode: "instant", request: toWithdrawRequest(request) });
+      res.status(201).json({ mode: "instant", request: toWithdrawRequest(request), fees });
       return;
     }
 
-    // Windowed: funds move when the request executes after the window.
+    // Windowed: funds move — and fees crystallize — when the request
+    // executes after the window (at worse-of pricing).
     const request = await prisma.withdrawRequest.create({
       data: {
         vaultId: dbVault.id,

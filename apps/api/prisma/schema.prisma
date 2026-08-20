@@ -32,6 +32,7 @@ model User {
   deposits         Deposit[]
   withdrawRequests WithdrawRequest[]
   trackedWallets   TrackedWallet[]
+  vaultDepositors  VaultDepositor[]
 }
 
 model Vault {
@@ -56,6 +57,10 @@ model Vault {
   redeemWindowHours Int     @default(24)
   solBufferSol     Float    @default(0)
   thesis           String?
+  // fees crystallized on exits, accrued OUTSIDE tvl (owed, not equity):
+  // trader performance fee + platform cut (the buyback sink)
+  traderFeesAccruedSol   Float @default(0)
+  platformFeesAccruedSol Float @default(0)
 
   equityPoints     EquityPoint[]
   positions        Position[]
@@ -65,6 +70,7 @@ model Vault {
   trackedWallets   TrackedWallet[]
   orders           Order[]
   dcaOrders        DcaOrder[]
+  vaultDepositors  VaultDepositor[]
 
   @@index([traderId])
   @@index([type, status])
@@ -168,6 +174,25 @@ model Deposit {
   createdAt DateTime @default(now())
 
   @@index([vaultId])
+  @@index([userId])
+}
+
+// Per-(vault, depositor) position ledger — the paper twin of the Anchor
+// program's VaultDepositor PDA. Fees crystallize per-portion on exit:
+// profit = gross − proportional cost basis, split 70/20/10.
+model VaultDepositor {
+  id       String @id @default(cuid())
+  vaultId  String
+  vault    Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+  shares   Float  @default(0)
+  /** remaining cost basis of the held shares (SOL) */
+  costSol  Float  @default(0)
+  /** lifetime profit share already paid to the trader from this depositor */
+  cumulativeTraderFeeSol Float @default(0)
+
+  @@unique([vaultId, userId])
   @@index([userId])
 }
 
