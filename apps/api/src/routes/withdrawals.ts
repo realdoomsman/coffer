@@ -46,6 +46,11 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
       return;
     }
 
+    // worse-of payouts can pay below fair value — the difference accrues to
+    // remaining holders, so recompute per-share value after the exit
+    const newShares = Math.max(0, vault.totalShares - request.shares);
+    const newTvl = Math.max(0, vault.tvlSol - paidSol);
+    const newSharePrice = newShares > 0 ? newTvl / newShares : 1;
     const [updated] = await prisma.$transaction([
       prisma.withdrawRequest.update({
         where: { id: request.id },
@@ -54,15 +59,16 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
       prisma.vault.update({
         where: { id: vault.id },
         data: {
-          tvlSol: { decrement: paidSol },
-          totalShares: { decrement: request.shares },
+          tvlSol: newTvl,
+          totalShares: newShares,
           solBufferSol: { decrement: paidSol },
+          sharePriceSol: newSharePrice,
         },
       }),
       prisma.equityPoint.upsert({
         where: { vaultId_t: { vaultId: vault.id, t: now } },
-        update: { v: Math.max(0, vault.tvlSol - paidSol) },
-        create: { vaultId: vault.id, t: now, v: Math.max(0, vault.tvlSol - paidSol) },
+        update: { v: newSharePrice },
+        create: { vaultId: vault.id, t: now, v: newSharePrice },
       }),
     ]);
 

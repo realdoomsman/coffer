@@ -51,11 +51,22 @@ app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "not found" });
 });
 
-// Error middleware — JSON errors, stack stays server-side.
+// Error middleware — JSON errors, stack stays server-side. Client input
+// errors (malformed JSON = 400, oversized body = 413 — body-parser sets
+// err.status) must not be reported as server faults.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("[api] unhandled error:", err);
-  const message = err instanceof Error ? err.message : "internal error";
-  res.status(500).json({ error: message });
+  const status =
+    (err as { status?: number; statusCode?: number }).status ??
+    (err as { statusCode?: number }).statusCode ??
+    500;
+  if (status >= 500) console.error("[api] unhandled error:", err);
+  const message =
+    status < 500
+      ? status === 413
+        ? "request body too large"
+        : "malformed request body"
+      : "internal error";
+  res.status(status).json({ error: message });
 });
 
 const ROUTES: Array<[string, string]> = [

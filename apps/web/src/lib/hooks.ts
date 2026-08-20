@@ -65,7 +65,13 @@ export function useCountUp(target: number, durationMs = 700): number {
       if (p < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // rAF never fires in hidden tabs — snap to the target so backgrounded
+    // pages don't show stale zeros when revealed
+    const settle = setTimeout(() => setValue(target), durationMs + 80);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(settle);
+    };
   }, [target, durationMs, reduced]);
 
   return value;

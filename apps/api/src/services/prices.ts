@@ -163,8 +163,10 @@ async function dexScreenerLookup(mint: string): Promise<DexScreenerMeta | undefi
         ? rawMcap
         : undefined;
     return {
-      symbol: best.baseToken?.symbol,
-      name: best.baseToken?.name,
+      // upstream metadata carries stray whitespace ("Fartcoin ") — trim at
+      // the source so it never reaches symbols, tapes, or activity strings
+      symbol: best.baseToken?.symbol?.trim() || undefined,
+      name: best.baseToken?.name?.trim() || undefined,
       imageUrl: best.info?.imageUrl,
       dex: best.dexId,
       pairAddress: best.pairAddress,

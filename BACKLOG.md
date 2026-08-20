@@ -63,7 +63,12 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 ## Known bugs / debt
 
 - GT free-tier budgeter smooths 429s but a paid key (or Birdeye) is the real fix
-- Oracle metadata occasionally wrong (mcap sanity gate added; root-cause pair selection)
 - lightweight-charts region breaks the a11y tree on terminal (cosmetic, affects tooling)
-- Seeded demo vaults' fake history mixes with real re-marks — regenerate seeds from real
-  price history, or accept the honesty of the cliff
+- usePoll pauses in hidden tabs by design (refetches on visibility) — headless tooling
+  that keeps the pane hidden sees stale lists; not a user-facing issue
+
+Fixed by the 2026-08-20 QA sweep (kept for history): frozen sharePriceSol corrupting
+all depositor math · equity curve counting flows as performance (now per-share value) ·
+paper TVL leaking into /api/meta headline · 500s for malformed/oversized request bodies ·
+untrimmed upstream symbols · mcap pair-selection poisoning (earlier) · same-second
+equity-point constraint crashes (earlier)

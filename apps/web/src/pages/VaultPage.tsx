@@ -78,7 +78,10 @@ export function VaultPage() {
           </div>
 
           <div className="panel panel-pad" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span className="dimtx mono" style={{ fontSize: 10, letterSpacing: "0.14em" }}>
+                PER-SHARE VALUE — FLOWS DON'T MOVE IT, PERFORMANCE DOES
+              </span>
               <div className="viewtoggle">
                 {RANGES.map((r) => (
                   <button key={r.id} className={range === r.id ? "on" : ""} onClick={() => setRange(r.id)}>

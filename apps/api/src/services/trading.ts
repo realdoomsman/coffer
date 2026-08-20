@@ -197,11 +197,14 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
       },
     });
 
-    // buffer moves, then tvl = buffer + Σ position marks
+    // buffer moves, then tvl = buffer + Σ position marks. Share price is
+    // NAV per share — it MUST move with trading pnl (a frozen share price
+    // silently robs depositors on entry/exit; QA finding).
     const solBufferSol = Math.max(0, vault.solBufferSol + (side === "buy" ? -solAmount : solAmount));
     const agg = await tx.position.aggregate({ where: { vaultId }, _sum: { valueSol: true } });
     const tvlSol = solBufferSol + (agg._sum.valueSol ?? 0);
-    await tx.vault.update({ where: { id: vaultId }, data: { solBufferSol, tvlSol } });
+    const sharePriceSol = vault.totalShares > 0 ? tvlSol / vault.totalShares : 1;
+    await tx.vault.update({ where: { id: vaultId }, data: { solBufferSol, tvlSol, sharePriceSol } });
 
     const last = await tx.equityPoint.findFirst({
       where: { vaultId },
@@ -209,10 +212,12 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
       select: { t: true },
     });
     if (!last || now - last.t >= EQUITY_MIN_GAP_SEC) {
+      // equity curve records PER-SHARE value — flow-independent, so
+      // deposits/withdrawals never masquerade as performance
       await tx.equityPoint.upsert({
         where: { vaultId_t: { vaultId, t: now } },
-        update: { v: tvlSol },
-        create: { vaultId, t: now, v: tvlSol },
+        update: { v: sharePriceSol },
+        create: { vaultId, t: now, v: sharePriceSol },
       });
     }
 

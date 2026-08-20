@@ -122,7 +122,7 @@ export function EquityChart({ points, height = 230 }: { points: EquityPoint[]; h
         viewBox={`0 0 ${width} ${height}`}
         style={{ width: "100%", height: "auto", display: "block" }}
         role="img"
-        aria-label="Vault equity over time"
+        aria-label="Per-share value over time — deposits and withdrawals don't move it, only performance does"
       >
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -164,7 +164,7 @@ export function EquityChart({ points, height = 230 }: { points: EquityPoint[]; h
             whiteSpace: "nowrap",
           }}
         >
-          {hi.v.toFixed(2)} ◎ ·{" "}
+          {hi.v.toFixed(4)} ◎/share ·{" "}
           {new Date(hi.t * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
         </div>
       )}

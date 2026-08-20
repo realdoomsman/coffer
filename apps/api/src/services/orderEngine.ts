@@ -242,7 +242,7 @@ async function revalTick(): Promise<void> {
     const [vaults, sums] = await Promise.all([
       prisma.vault.findMany({
         where: { mode: "paper" },
-        select: { id: true, solBufferSol: true },
+        select: { id: true, solBufferSol: true, totalShares: true },
       }),
       prisma.position.groupBy({ by: ["vaultId"], _sum: { valueSol: true } }),
     ]);
@@ -251,7 +251,10 @@ async function revalTick(): Promise<void> {
     for (const vault of vaults) {
       try {
         const tvlSol = vault.solBufferSol + (sumByVault.get(vault.id) ?? 0);
-        await prisma.vault.update({ where: { id: vault.id }, data: { tvlSol } });
+        // NAV per share moves with the marks; equity curve records it
+        // (per-share = flow-independent performance, QA finding)
+        const sharePriceSol = vault.totalShares > 0 ? tvlSol / vault.totalShares : 1;
+        await prisma.vault.update({ where: { id: vault.id }, data: { tvlSol, sharePriceSol } });
         const last = await prisma.equityPoint.findFirst({
           where: { vaultId: vault.id },
           orderBy: { t: "desc" },
@@ -260,8 +263,8 @@ async function revalTick(): Promise<void> {
         if (!last || now - last.t > EQUITY_MAX_AGE_SEC) {
           await prisma.equityPoint.upsert({
             where: { vaultId_t: { vaultId: vault.id, t: now } },
-            update: { v: tvlSol },
-            create: { vaultId: vault.id, t: now, v: tvlSol },
+            update: { v: sharePriceSol },
+            create: { vaultId: vault.id, t: now, v: sharePriceSol },
           });
         }
       } catch (err) {
