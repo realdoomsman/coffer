@@ -136,9 +136,10 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
       {msg && <div className={`callout ${msg.tone}`} style={{ marginTop: 12 }}>{msg.text}</div>}
 
       <p className="dimtx" style={{ fontSize: 12, marginBottom: 0 }}>
-        Withdrawals beyond the SOL buffer enter a {vault.redeemWindowHours}h window and pay the{" "}
-        <em>worse of</em> request-time and execution-time value — this protects depositors who stay.
-        The trader can trade this vault but can never withdraw from it.
+        Small exits pay instantly from the vault's cash. Big exits wait up to{" "}
+        {vault.redeemWindowHours}h and pay whichever value is lower — when you asked or when it
+        pays — so nobody games the queue at other depositors' expense. The trader can trade this
+        money but can never take it.
       </p>
     </div>
   );

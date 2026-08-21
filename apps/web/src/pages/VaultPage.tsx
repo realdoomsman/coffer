@@ -141,16 +141,18 @@ export function VaultPage() {
           <DepositPanel vault={vault} onChanged={load} />
 
           <div className="panel panel-pad">
-            <div className="sectiontitle" style={{ marginTop: 0 }}>Terms</div>
-            <div className="kv"><span className="k">Performance fee</span><span className="v">{(vault.perfFeeBps / 100).toFixed(0)}% of profit</span></div>
-            <div className="kv"><span className="k">Profit split</span><span className="v">70 / 20 / 10</span></div>
-            <div className="kv"><span className="k">High-water mark</span><span className="v">per-depositor</span></div>
-            <div className="kv"><span className="k">Redeem window</span><span className="v">{vault.redeemWindowHours}h</span></div>
-            <div className="kv"><span className="k">Manager stake</span><span className="v">{fmtSol(vault.managerStakeSol)} ◎ ({vault.managerStakePct.toFixed(1)}%)</span></div>
-            <div className="kv"><span className="k">SOL buffer</span><span className="v">{fmtSol(vault.solBufferSol)} ◎</span></div>
+            <div className="sectiontitle" style={{ marginTop: 0 }}>The deal</div>
             <div className="kv">
-              <span className="k">Fees crystallized</span>
-              <span className="v" title="Charged only on realized profit above each depositor's cost basis">
+              <span className="k">If you profit</span>
+              <span className="v">keep {(100 - vault.perfFeeBps / 100 - 10).toFixed(0)}% · trader {(vault.perfFeeBps / 100).toFixed(0)}% · platform 10%</span>
+            </div>
+            <div className="kv"><span className="k">If you lose</span><span className="v">no fees, ever</span></div>
+            <div className="kv"><span className="k">Big-exit wait</span><span className="v">up to {vault.redeemWindowHours}h</span></div>
+            <div className="kv"><span className="k">Trader's own money in</span><span className="v">{fmtSol(vault.managerStakeSol)} ◎ ({vault.managerStakePct.toFixed(1)}%)</span></div>
+            <div className="kv"><span className="k">Instant-exit cash</span><span className="v">{fmtSol(vault.solBufferSol)} ◎</span></div>
+            <div className="kv">
+              <span className="k">Fees paid so far</span>
+              <span className="v" title="Charged only on realized profit above each depositor's cost basis — a recovery back to break-even is never charged">
                 trader {fmtSol(vault.traderFeesAccruedSol)} ◎ · buyback {fmtSol(vault.platformFeesAccruedSol)} ◎
               </span>
             </div>

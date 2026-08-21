@@ -51,6 +51,10 @@ export function TraderDashboard() {
           <h1>My vault</h1>
           <div className="sub">The trader side: what you manage, what's pending against you, where your fees stand.</div>
         </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <Link to="/settings/profile" className="btn ghost sm">Edit profile</Link>
+          <Link to="/create" className="btn sm">+ New vault</Link>
+        </div>
         <div className="chipsrow">
           {vaults.slice(0, 6).map((v) => (
             <button key={v.id} className={`chip ${selected === v.id ? "on" : ""}`} onClick={() => setSelected(v.id)}>

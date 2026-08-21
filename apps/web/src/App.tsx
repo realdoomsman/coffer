@@ -194,15 +194,13 @@ export default function App() {
         <Nav to="/portfolio" hotkey="p" label="Portfolio" />
 
         <div className="navsec">Trade</div>
-        <Nav to="/pulse" hotkey="d" label="Pulse" />
         <Nav to="/terminal" hotkey="t" label="Terminal" />
         <Nav to="/dashboard" hotkey="v" label="My vault" />
-        <Nav to="/create" hotkey="n" label="Create vault" />
-        <Nav to="/settings/profile" hotkey="m" label="My profile" />
 
-        <div className="navsec">Intel</div>
-        <Nav to="/tracking" hotkey="w" label="Wallet tracking" />
-        <Nav to="/leaderboards" hotkey="l" label="Leaderboards" />
+        <div className="navsec">Discover</div>
+        <Nav to="/pulse" hotkey="d" label="Pulse" />
+        <Nav to="/tracking" hotkey="w" label="Wallets" />
+        <Nav to="/leaderboards" hotkey="l" label="Leaders" />
 
         <div className="navsec">Sandbox</div>
         <Nav to="/paper" hotkey="b" label="Paper trading" />
