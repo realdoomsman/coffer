@@ -26,8 +26,9 @@ export function CandleChart({
   const chartRef = useRef<HTMLDivElement>(null);
   const chartApi = useRef<IChartApi | null>(null);
   const seriesApi = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const hasData = useRef(false);
   const [pool, setPool] = useState<string | null>(null);
-  const [candleState, setCandleState] = useState<"loading" | "live" | "none">("loading");
+  const [candleState, setCandleState] = useState<"loading" | "live" | "stale" | "none">("loading");
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -64,6 +65,9 @@ export function CandleChart({
 
   useEffect(() => {
     let alive = true;
+    // token/timeframe change: clear the old series so nothing bleeds across
+    hasData.current = false;
+    seriesApi.current?.setData([]);
     setCandleState("loading");
     const load = () =>
       api
@@ -72,12 +76,16 @@ export function CandleChart({
           if (!alive || !seriesApi.current || !chartApi.current) return;
           setPool(r.pool);
           if (r.candles.length === 0) {
-            seriesApi.current.setData([]);
-            setCandleState("none");
+            // failed refresh keeps the drawn chart — stale beats blank
+            setCandleState(hasData.current ? "stale" : "none");
             return;
           }
+          // strictly-ascending unique timestamps or lightweight-charts throws
+          const clean = [...r.candles]
+            .sort((a, b) => a.t - b.t)
+            .filter((c, i, arr) => i === arr.length - 1 || c.t !== arr[i + 1]!.t);
           seriesApi.current.setData(
-            r.candles.map((c) => ({
+            clean.map((c) => ({
               time: c.t as UTCTimestamp,
               open: c.o,
               high: c.h,
@@ -86,9 +94,10 @@ export function CandleChart({
             })),
           );
           chartApi.current.timeScale().fitContent();
-          setCandleState("live");
+          hasData.current = true;
+          setCandleState(r.stale ? "stale" : "live");
         })
-        .catch(() => alive && setCandleState("none"));
+        .catch(() => alive && setCandleState(hasData.current ? "stale" : "none"));
     load();
     const iv = setInterval(load, 30_000);
     return () => {
@@ -108,8 +117,17 @@ export function CandleChart({
         )}
         {candleState === "none" && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-            <span className="mono dimtx">no pool candles for this token</span>
+            <span className="mono dimtx">no pool candles yet — new tokens chart once they trade on a pool</span>
           </div>
+        )}
+        {candleState === "stale" && (
+          <span
+            className="pill stale"
+            style={{ position: "absolute", top: 8, left: 8 }}
+            title="Data source is rate-limited — showing the last good chart, retrying every 30s"
+          >
+            stale — retrying
+          </span>
         )}
       </div>
       {pool && (

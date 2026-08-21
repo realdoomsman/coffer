@@ -11,7 +11,7 @@
 // failures degrade to {trades: []}, never a 500.
 
 import type { PoolTrade, TradeSide } from "@coffer/shared";
-import { cacheGet, cacheSet } from "../cache.js";
+import { cacheGet, cacheSet, recallGood, rememberGood } from "../cache.js";
 import { gtFetch } from "./gtBudget.js";
 import { topPool } from "./ohlcv.js";
 
@@ -74,8 +74,9 @@ export async function getPoolTrades(mint: string): Promise<PoolTradesResult> {
   const cached = cacheGet<PoolTradesResult>(key);
   if (cached !== undefined) return cached;
 
+  const good = recallGood<PoolTradesResult>(key);
   const pool = await topPool(mint);
-  if (!pool) return cacheSet(key, { trades: [] }, TRADES_TTL_MS);
+  if (!pool) return cacheSet(key, good?.value ?? { trades: [] }, TRADES_TTL_MS);
 
   let trades: PoolTrade[] = [];
   try {
@@ -92,5 +93,7 @@ export async function getPoolTrades(mint: string): Promise<PoolTradesResult> {
   } catch {
     trades = [];
   }
-  return cacheSet(key, { trades }, TRADES_TTL_MS);
+  // a failed refresh keeps the tape rather than emptying it
+  if (trades.length === 0 && good) return cacheSet(key, good.value, TRADES_TTL_MS);
+  return cacheSet(key, rememberGood(key, { trades }), TRADES_TTL_MS);
 }

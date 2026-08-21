@@ -38,6 +38,23 @@ export function cacheSet<T>(key: string, value: T, ttlMs: number): T {
   return value;
 }
 
+// ── last-good layer ────────────────────────────────────────────────
+// "Degrades to stale, never to blank": services remember the last GOOD
+// payload per key (24h) and serve it — flagged stale — when the fresh
+// fetch fails or comes back empty. An upstream 429 must never erase a
+// chart the user has already seen.
+
+const GOOD_TTL_MS = 24 * 3600_000;
+
+export function rememberGood<T>(key: string, value: T): T {
+  store.set(`good:${key}`, { value: { value, at: Date.now() }, expiresAt: Date.now() + GOOD_TTL_MS });
+  return value;
+}
+
+export function recallGood<T>(key: string): { value: T; at: number } | undefined {
+  return cacheGet<{ value: T; at: number }>(`good:${key}`);
+}
+
 /**
  * Read-through helper: returns the cached value or runs `load`, caches
  * the result for `ttlMs`, and returns it. Concurrent callers for the

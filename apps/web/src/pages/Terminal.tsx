@@ -121,7 +121,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
   const seriesApi = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const rawCandles = useRef<{ t: number; o: number; h: number; l: number; c: number }[]>([]);
   const [pool, setPool] = useState<string | null>(null);
-  const [candleState, setCandleState] = useState<"loading" | "live" | "none">("loading");
+  const [candleState, setCandleState] = useState<"loading" | "live" | "stale" | "none">("loading");
 
   // supply powers the Price/MCap denomination toggle — memecoin traders think in mcap
   useEffect(() => {
@@ -201,6 +201,9 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
 
   useEffect(() => {
     let alive = true;
+    // token/timeframe changed — old candles must never bleed across
+    rawCandles.current = [];
+    setCandleVer((v) => v + 1);
     setCandleState("loading");
     const load = () =>
       api
@@ -208,11 +211,21 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
         .then((r) => {
           if (!alive) return;
           setPool(r.pool);
-          rawCandles.current = r.candles;
-          setCandleVer((v) => v + 1);
-          setCandleState(r.candles.length === 0 ? "none" : "live");
+          if (r.candles.length > 0) {
+            rawCandles.current = r.candles;
+            setCandleVer((v) => v + 1);
+            setCandleState(r.stale ? "stale" : "live");
+          } else if (rawCandles.current.length > 0) {
+            // failed refresh — keep what the user is looking at
+            setCandleState("stale");
+          } else {
+            setCandleState("none");
+          }
         })
-        .catch(() => alive && setCandleState("none"));
+        .catch(() => {
+          if (!alive) return;
+          setCandleState(rawCandles.current.length > 0 ? "stale" : "none");
+        });
     load();
     const iv = setInterval(load, 30_000);
     return () => {
@@ -480,8 +493,17 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
               )}
               {candleState === "none" && (
                 <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-                  <span className="mono dimtx">no pool candles for this token</span>
+                  <span className="mono dimtx">no pool candles yet — new tokens chart once they trade on a pool</span>
                 </div>
+              )}
+              {candleState === "stale" && (
+                <span
+                  className="pill stale"
+                  style={{ position: "absolute", top: 8, left: 8 }}
+                  title="Data source is rate-limited — showing the last good chart, retrying every 30s"
+                >
+                  stale — retrying
+                </span>
               )}
             </div>
             {pool && (

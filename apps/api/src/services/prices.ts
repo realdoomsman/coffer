@@ -9,7 +9,7 @@
 // price. Token marks cache 5s, metadata 300s, SOL/USD 15s.
 
 import type { TokenInfo } from "@coffer/shared";
-import { cacheGet, cacheSet, getOrSet } from "../cache.js";
+import { cacheGet, cacheSet, getOrSet, recallGood, rememberGood } from "../cache.js";
 import { env } from "../env.js";
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
@@ -200,8 +200,13 @@ export async function solPriceUsd(): Promise<number> {
     const meta = await dexScreenerLookup(SOL_MINT);
     price = meta?.priceUsd ?? 0;
   }
-  if (price > 0) cacheSet("solUsd", price, SOL_PRICE_TTL_MS);
-  return price;
+  if (price > 0) {
+    rememberGood("solUsd", price);
+    return cacheSet("solUsd", price, SOL_PRICE_TTL_MS);
+  }
+  // both tiers failed — a zero here would zero priceSol for EVERY token,
+  // so fall back to the last good SOL price instead
+  return recallGood<number>("solUsd")?.value ?? 0;
 }
 
 // ── composition ────────────────────────────────────────────────────

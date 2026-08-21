@@ -7,7 +7,7 @@
 // pool: null; the route always answers 200.
 
 import type { TokenPoolStats } from "@coffer/shared";
-import { getOrSet } from "../cache.js";
+import { getOrSet, recallGood, rememberGood } from "../cache.js";
 import { gtFetch } from "./gtBudget.js";
 import { topPool } from "./ohlcv.js";
 
@@ -53,9 +53,12 @@ function emptyStats(mint: string): TokenPoolStats {
 }
 
 export async function getTokenPoolStats(mint: string): Promise<TokenPoolStats> {
-  return getOrSet(`tokenstats:${mint}`, STATS_TTL_MS, async () => {
+  const goodKey = `tokenstats:${mint}`;
+  return getOrSet(goodKey, STATS_TTL_MS, async () => {
+    // degrade to the last good stats rather than blanking the strip
+    const good = recallGood<TokenPoolStats>(goodKey);
     const pool = await topPool(mint);
-    if (!pool) return emptyStats(mint);
+    if (!pool) return good?.value ?? emptyStats(mint);
     try {
       const res = await gtFetch(
         `${GT_BASE}/networks/solana/pools/${encodeURIComponent(pool)}`,
@@ -70,7 +73,7 @@ export async function getTokenPoolStats(mint: string): Promise<TokenPoolStats> {
       const m5 = txnBucket(txns.m5);
       const h1 = txnBucket(txns.h1);
       const h24 = txnBucket(txns.h24);
-      return {
+      const out = {
         mint,
         pool,
         priceChangePct: {
@@ -91,8 +94,9 @@ export async function getTokenPoolStats(mint: string): Promise<TokenPoolStats> {
         },
         fetchedAt: Date.now(),
       } satisfies TokenPoolStats;
+      return rememberGood(goodKey, out);
     } catch {
-      return emptyStats(mint);
+      return good?.value ?? emptyStats(mint);
     }
   });
 }

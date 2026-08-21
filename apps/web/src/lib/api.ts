@@ -129,7 +129,9 @@ export const api = {
       | { side: "sell"; mint: string; sellFraction: number },
   ) => post<TradeResult>(`/vaults/${vaultId}/trade`, body),
   ohlcv: async (mint: string, tf: "1m" | "5m" | "15m" | "1h") => {
-    const r = await get<{ candles: Candle[]; pool: string | null }>(`/ohlcv/${mint}?tf=${tf}`);
+    const r = await get<{ candles: Candle[]; pool: string | null; stale?: boolean; fetchedAt?: number }>(
+      `/ohlcv/${mint}?tf=${tf}`,
+    );
     return r;
   },
   searchTokens: async (q: string) => {
