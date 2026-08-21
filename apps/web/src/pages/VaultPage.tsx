@@ -85,7 +85,7 @@ export function VaultPage() {
       <div className="sidegrid">
         <div>
           <div className="statrow" style={{ marginBottom: 16 }}>
-            <Stat k="TVL" v={`${fmtSol(vault.tvlSol, 0)} ◎`} />
+            <Stat k="TVL" v={`${fmtSol(vault.tvlSol)} ◎`} />
             <Stat k="30d return" v={fmtPct(s.pnlPct30d)} tone={s.pnlPct30d >= 0 ? "pos" : "neg"} />
             <Stat k="All-time" v={fmtPct(s.pnlPctAll)} tone={s.pnlPctAll >= 0 ? "pos" : "neg"} />
             <Stat k="Max drawdown" v={fmtPct(-Math.abs(s.maxDrawdownPct))} tone="neg" />

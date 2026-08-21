@@ -186,7 +186,15 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
       // rows are [ts, o, h, l, c, v] newest-first — flip to oldest-first
       const candles = (body?.data?.attributes?.ohlcv_list ?? [])
         .filter((r): r is number[] => Array.isArray(r) && r.length >= 5)
-        .map((r) => ({ t: r[0]!, o: r[1]!, h: r[2]!, l: r[3]!, c: r[4]!, v: r[5] }))
+        .map((r) => ({ t: Number(r[0]), o: Number(r[1]), h: Number(r[2]), l: Number(r[3]), c: Number(r[4]), v: r[5] }))
+        // same validation the pump.fun branch applies — a NaN/null row
+        // would reach the chart and break it
+        .filter(
+          (c) =>
+            Number.isFinite(c.t) && c.t > 0 &&
+            Number.isFinite(c.o) && Number.isFinite(c.h) &&
+            Number.isFinite(c.l) && Number.isFinite(c.c),
+        )
         .sort((a, b) => a.t - b.t);
       if (candles.length > 0) {
         const fresh: OhlcvResult = {

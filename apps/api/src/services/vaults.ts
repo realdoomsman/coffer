@@ -145,6 +145,7 @@ export function toTraderProfile(user: DbUser, allTrades: DbTrade[]): TraderProfi
     // link. Flip to a real DB flag when the OAuth flow ships.
     xVerified: false,
     bio: user.bio ?? undefined,
+    // real-vault trades only — see the wall note in assembleVaults
     onchainStats: traderStatsFromTrades(allTrades),
   };
 }
@@ -264,7 +265,7 @@ export async function assembleVaults(
     }),
     prisma.vault.findMany({
       where: { traderId: { in: traderIds } },
-      select: { id: true, traderId: true },
+      select: { id: true, traderId: true, mode: true },
     }),
   ]);
 
@@ -276,6 +277,13 @@ export async function assembleVaults(
     : [];
 
   const vaultOwner = new Map(traderVaultRows.map((v) => [v.id, v.traderId]));
+  // THE WALL, applied to reputation: a trader's on-chain record counts
+  // REAL-vault trades only. Paper fills are ledger entries — letting them
+  // into onchainStats let 185 sandbox trades masquerade as a live track
+  // record on a real vault page (audit).
+  const realVaultIds = new Set(
+    traderVaultRows.filter((v) => v.mode === "real").map((v) => v.id),
+  );
   const tradesByVault = new Map<string, DbTrade[]>();
   const tradesByTrader = new Map<string, DbTrade[]>();
   for (const t of [...tradeRows, ...extraTrades]) {
@@ -285,7 +293,7 @@ export async function assembleVaults(
       tradesByVault.set(t.vaultId, list);
     }
     const owner = vaultOwner.get(t.vaultId);
-    if (owner) {
+    if (owner && realVaultIds.has(t.vaultId)) {
       const list = tradesByTrader.get(owner) ?? [];
       list.push(t);
       tradesByTrader.set(owner, list);
