@@ -28,6 +28,7 @@ export function CandleChart({
   const seriesApi = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const hasData = useRef(false);
   const [pool, setPool] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [candleState, setCandleState] = useState<"loading" | "live" | "stale" | "none">("loading");
 
   useEffect(() => {
@@ -75,6 +76,7 @@ export function CandleChart({
         .then((r) => {
           if (!alive || !seriesApi.current || !chartApi.current) return;
           setPool(r.pool);
+          setSource(r.source ?? null);
           if (r.candles.length === 0) {
             // failed refresh keeps the drawn chart — stale beats blank
             setCandleState(hasData.current ? "stale" : "none");
@@ -130,9 +132,10 @@ export function CandleChart({
           </span>
         )}
       </div>
-      {pool && (
+      {(source || pool) && (
         <div className="mono dimtx" style={{ fontSize: 10.5, marginTop: 6 }}>
-          candles: GeckoTerminal · pool {pool.slice(0, 10)}… · refreshes 30s
+          candles: {source === "pumpfun" ? "pump.fun" : source === "geckoterminal" ? "GeckoTerminal" : "—"}
+          {pool ? ` · pool ${pool.slice(0, 10)}…` : ""} · refreshes 30s
         </div>
       )}
     </>

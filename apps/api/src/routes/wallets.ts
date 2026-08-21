@@ -94,6 +94,11 @@ walletsRouter.post("/tracked", async (req, res, next) => {
       res.status(400).json({ error: "address must be a base58 Solana address" });
       return;
     }
+    if (label !== undefined && typeof label !== "string") {
+      // label?.trim() on a non-string threw and surfaced as a 500
+      res.status(400).json({ error: "label must be a string" });
+      return;
+    }
     const user = await getDemoUser();
 
     // Create with zeroed stats — the real scan below fills them in. We

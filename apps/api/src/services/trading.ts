@@ -197,14 +197,38 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
       },
     });
 
-    // buffer moves, then tvl = buffer + Σ position marks. Share price is
-    // NAV per share — it MUST move with trading pnl (a frozen share price
-    // silently robs depositors on entry/exit; QA finding).
-    const solBufferSol = Math.max(0, vault.solBufferSol + (side === "buy" ? -solAmount : solAmount));
+    // Buffer debit is CONDITIONAL and atomic. The pre-transaction check
+    // above is only a fast path: concurrent buys each read the same
+    // pre-transaction snapshot, so without a guarded write five parallel
+    // 10-SOL buys against a 10-SOL buffer would all "succeed" and mint
+    // assets from nothing (audit: 10 SOL deposit -> 30 SOL of positions,
+    // share price 3.0). Never clamp an overdraft with Math.max(0, ...) —
+    // a clamp turns a trade that must fail into fabricated NAV.
+    if (side === "buy") {
+      const debited = await tx.vault.updateMany({
+        where: { id: vaultId, solBufferSol: { gte: solAmount } },
+        data: { solBufferSol: { decrement: solAmount } },
+      });
+      if (debited.count === 0) {
+        throw new TradeError(400, `insufficient SOL buffer (requested ${solAmount})`);
+      }
+    } else {
+      await tx.vault.update({
+        where: { id: vaultId },
+        data: { solBufferSol: { increment: solAmount } },
+      });
+    }
+
+    // re-read the post-debit truth, then derive tvl and NAV per share
+    const fresh = await tx.vault.findUniqueOrThrow({
+      where: { id: vaultId },
+      select: { solBufferSol: true, totalShares: true },
+    });
     const agg = await tx.position.aggregate({ where: { vaultId }, _sum: { valueSol: true } });
+    const solBufferSol = fresh.solBufferSol;
     const tvlSol = solBufferSol + (agg._sum.valueSol ?? 0);
-    const sharePriceSol = vault.totalShares > 0 ? tvlSol / vault.totalShares : 1;
-    await tx.vault.update({ where: { id: vaultId }, data: { solBufferSol, tvlSol, sharePriceSol } });
+    const sharePriceSol = fresh.totalShares > 0 ? tvlSol / fresh.totalShares : 1;
+    await tx.vault.update({ where: { id: vaultId }, data: { tvlSol, sharePriceSol } });
 
     const last = await tx.equityPoint.findFirst({
       where: { vaultId },

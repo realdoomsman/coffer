@@ -66,6 +66,16 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
     const newShares = Math.max(0, vault.totalShares - request.shares);
     const newTvl = Math.max(0, vault.tvlSol - grossSol);
     const newSharePrice = newShares > 0 ? newTvl / newShares : 1;
+    // Claim the request atomically FIRST: two concurrent executes would
+    // otherwise both pass the status/buffer checks above and pay twice.
+    const claimed = await prisma.withdrawRequest.updateMany({
+      where: { id: request.id, status: { in: ["pending", "executable"] } },
+      data: { status: "paid", paidAt: now },
+    });
+    if (claimed.count === 0) {
+      res.status(409).json({ error: "request already executed" });
+      return;
+    }
     const [updated] = await prisma.$transaction([
       prisma.withdrawRequest.update({
         where: { id: request.id },

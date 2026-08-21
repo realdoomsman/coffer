@@ -2,6 +2,16 @@ import { Link } from "react-router-dom";
 import { fmtSol, type Position } from "@coffer/shared";
 import { Delta } from "./bits";
 
+/** Never floor a real holding to "0": sub-1 balances (WBTC, WETH) keep
+ *  enough precision to stay truthful next to their SOL value. */
+function fmtTokenAmount(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  if (v === 0) return "0";
+  if (v >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  if (v >= 1) return v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return v.toPrecision(3);
+}
+
 export function PositionsTable({ positions }: { positions: Position[] }) {
   if (positions.length === 0) return <div className="empty">No open positions — vault is in SOL</div>;
   return (
@@ -25,7 +35,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
                   {p.symbol}
                 </Link>
               </td>
-              <td className="r num dimtx">{p.amountTokens.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+              <td className="r num dimtx">{fmtTokenAmount(p.amountTokens)}</td>
               <td className="r num">{fmtSol(p.costSol)} ◎</td>
               <td className="r num">{fmtSol(p.valueSol)} ◎</td>
               <td className="r num">

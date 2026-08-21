@@ -527,3 +527,13 @@ tr:first-child .rank.medal { color: var(--amber); font-weight: 700; }
   .brand { justify-content: center; padding-left: 0; padding-right: 0; }
   .content { padding: 14px; }
 }
+
+/* ── defensive truncation ──────────────────────────────────────────
+   Data is user-supplied: one long vault name must never be able to
+   push other columns off-screen (it once blew a table to 75,000px). */
+table.data td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+table.data td a { display: inline-block; max-width: 300px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.ticker .titem { max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
+.vcard .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+select { max-width: 260px; }

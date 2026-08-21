@@ -161,6 +161,22 @@ vaultsRouter.post("/", async (req, res, next) => {
       res.status(400).json({ error: "name must be at least 3 characters" });
       return;
     }
+    // Upper bound matters as much as the lower one: an unbounded name is
+    // rendered in every table, ticker and <select>, and one 10k-char name
+    // blew the vault tables out to 75,000px, pushing TVL and performance
+    // off-screen for EVERY other vault (audit).
+    if (name.trim().length > 60) {
+      res.status(400).json({ error: "name must be 60 characters or fewer" });
+      return;
+    }
+    if (thesis !== undefined && typeof thesis !== "string") {
+      res.status(400).json({ error: "thesis must be a string" });
+      return;
+    }
+    if (typeof thesis === "string" && thesis.trim().length > 500) {
+      res.status(400).json({ error: "thesis must be 500 characters or fewer" });
+      return;
+    }
     if (type !== "managed" && type !== "mirror") {
       res.status(400).json({ error: 'type must be "managed" or "mirror"' });
       return;
@@ -170,8 +186,12 @@ vaultsRouter.post("/", async (req, res, next) => {
       res.status(400).json({ error: 'mode must be "real" or "paper"' });
       return;
     }
-    if (type === "mirror" && !leaderWallet) {
-      res.status(400).json({ error: "mirror vaults require leaderWallet" });
+    if (
+      type === "mirror" &&
+      (typeof leaderWallet !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(leaderWallet))
+    ) {
+      // a truthy non-string used to reach Prisma and 500
+      res.status(400).json({ error: "mirror vaults require a valid base58 leaderWallet" });
       return;
     }
     // ── mirror copy config (mirror vaults only) ──────────────────────
@@ -289,6 +309,11 @@ vaultsRouter.post("/:id/deposit", async (req, res, next) => {
       res.status(400).json({ error: "sol must be a positive number" });
       return;
     }
+    // 1e307 SOL made tokenAmount overflow to Infinity and 500 the trade
+    if (sol > 1_000_000_000) {
+      res.status(400).json({ error: "sol exceeds the maximum deposit (1e9)" });
+      return;
+    }
     const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
     if (!dbVault) {
       res.status(404).json({ error: "vault not found" });
@@ -395,28 +420,29 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
         positionShares: depositor.shares,
         perfFeeBps: dbVault.perfFeeBps,
       });
-      const [request] = await prisma.$transaction([
-        prisma.withdrawRequest.create({
-          data: {
-            vaultId: dbVault.id,
-            userId: user.id,
-            shares,
-            valueAtRequestSol: valueSol,
-            requestedAt: now,
-            executableAt: now,
-            status: "paid",
-          },
-        }),
-        prisma.vaultDepositor.update({
-          where: { id: depositor.id },
+      const request = await prisma.$transaction(async (tx) => {
+        // CONDITIONAL, atomic debits. The held/buffer checks above are a
+        // fast path only — concurrent withdrawals all read the same stale
+        // snapshot, so unguarded decrements let 12 shares redeem against
+        // 10 held and drove totalShares/tvl/buffer negative (audit),
+        // which also made the holding vanish from the portfolio.
+        const burned = await tx.vaultDepositor.updateMany({
+          where: { id: depositor.id, shares: { gte: shares } },
           data: {
             shares: { decrement: shares },
             costSol: { decrement: fees.costBasisSol },
             cumulativeTraderFeeSol: { increment: fees.traderFeeSol },
           },
-        }),
-        prisma.vault.update({
-          where: { id: dbVault.id },
+        });
+        if (burned.count === 0) {
+          throw new TradeError(400, "insufficient shares (concurrent withdrawal)");
+        }
+        const paid = await tx.vault.updateMany({
+          where: {
+            id: dbVault.id,
+            totalShares: { gte: shares },
+            solBufferSol: { gte: valueSol },
+          },
           data: {
             // gross leaves depositor equity; fees move from the buffer
             // into the accrual buckets (owed, outside tvl)
@@ -426,14 +452,28 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
             traderFeesAccruedSol: { increment: fees.traderFeeSol },
             platformFeesAccruedSol: { increment: fees.platformFeeSol },
           },
-        }),
+        });
+        if (paid.count === 0) {
+          throw new TradeError(409, "vault buffer insufficient — try a windowed withdrawal");
+        }
         // a fair-priced withdrawal leaves per-share value unchanged
-        prisma.equityPoint.upsert({
+        await tx.equityPoint.upsert({
           where: { vaultId_t: { vaultId: dbVault.id, t: now } },
           update: { v: dbVault.sharePriceSol },
           create: { vaultId: dbVault.id, t: now, v: dbVault.sharePriceSol },
-        }),
-      ]);
+        });
+        return tx.withdrawRequest.create({
+          data: {
+            vaultId: dbVault.id,
+            userId: user.id,
+            shares,
+            valueAtRequestSol: valueSol,
+            requestedAt: now,
+            executableAt: now,
+            status: "paid",
+          },
+        });
+      });
       res.status(201).json({ mode: "instant", request: toWithdrawRequest(request), fees });
       return;
     }
@@ -453,6 +493,10 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
     });
     res.status(201).json({ mode: "windowed", request: toWithdrawRequest(request) });
   } catch (err) {
+    if (err instanceof TradeError) {
+      res.status(err.status).json(err.body ?? { error: err.message });
+      return;
+    }
     next(err);
   }
 });
