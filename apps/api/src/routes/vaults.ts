@@ -49,7 +49,12 @@ vaultsRouter.get("/", async (req, res, next) => {
       return;
     }
     const sortKey = (req.query.sort as SortKey | undefined) ?? "tvl";
-    const sorter = SORTERS[sortKey];
+    // own-property lookup only: `?sort=constructor` would otherwise reach
+    // an inherited Object.prototype member, pass the truthiness check and
+    // crash Array.sort with a non-comparator
+    const sorter = Object.prototype.hasOwnProperty.call(SORTERS, sortKey)
+      ? SORTERS[sortKey]
+      : undefined;
     if (!sorter) {
       res.status(400).json({ error: `sort must be one of ${Object.keys(SORTERS).join(", ")}` });
       return;

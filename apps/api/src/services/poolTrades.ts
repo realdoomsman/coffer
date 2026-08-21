@@ -1,4 +1,9 @@
-// ── live pool trade tape via GeckoTerminal (free, keyless) ─────────
+// ── live trade tape: pump.fun native, GeckoTerminal fallback ───────
+// PRIMARY is pump.fun's own /v2/coins/:mint/trades — it needs no pool,
+// so bonding-curve tokens have a tape too, it names the venue (pump vs
+// raydium_v4_amm), and it costs nothing against the GT rate budget.
+// FALLBACK is the GeckoTerminal pool tape, described below.
+//
 // Reuses the ohlcv service's top-pool resolution, then pulls the pool's
 // recent trades. Response shape verified against the live API:
 // attributes = { block_number, block_timestamp (ISO), tx_hash,
@@ -68,6 +73,55 @@ export interface PoolTradesResult {
   trades: PoolTrade[];
 }
 
+// ── pump.fun tape (primary) ────────────────────────────────────────
+
+interface PumpTradeRow {
+  tx?: string;
+  timestamp?: string; // ISO
+  userAddress?: string;
+  type?: string; // "buy" | "sell"
+  priceUsd?: string | number;
+  amountUsd?: string | number;
+  baseAmount?: string | number;
+}
+
+const n = (v: unknown): number => {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+};
+
+/** Recent trades straight from pump.fun. [] on any failure — never throws. */
+async function pumpTape(mint: string): Promise<PoolTrade[]> {
+  try {
+    const res = await fetch(
+      `https://swap-api.pump.fun/v2/coins/${encodeURIComponent(mint)}/trades?limit=${MAX_TRADES}`,
+      { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+    );
+    if (!res.ok) return [];
+    const body = (await res.json()) as { trades?: PumpTradeRow[] };
+    const rows = Array.isArray(body?.trades) ? body.trades : [];
+    return rows
+      .map((r) => {
+        const ts = Math.floor(Date.parse(r.timestamp ?? "") / 1000);
+        const side: TradeSide = r.type === "sell" ? "sell" : "buy";
+        return {
+          ts,
+          side,
+          priceUsd: n(r.priceUsd),
+          amountUsd: n(r.amountUsd),
+          amountToken: n(r.baseAmount),
+          txSig: r.tx ?? "",
+          wallet: r.userAddress ?? "",
+        };
+      })
+      .filter((t) => Number.isFinite(t.ts) && t.ts > 0 && t.txSig !== "")
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, MAX_TRADES);
+  } catch {
+    return [];
+  }
+}
+
 /** Latest ~40 trades in the mint's deepest pool, newest first. */
 export async function getPoolTrades(mint: string): Promise<PoolTradesResult> {
   const key = `gt:trades:${mint}`;
@@ -75,6 +129,14 @@ export async function getPoolTrades(mint: string): Promise<PoolTradesResult> {
   if (cached !== undefined) return cached;
 
   const good = recallGood<PoolTradesResult>(key);
+
+  // 1) pump.fun native — no pool needed, so bonding tokens get a tape
+  const pump = await pumpTape(mint);
+  if (pump.length > 0) {
+    return cacheSet(key, rememberGood(key, { trades: pump }), TRADES_TTL_MS);
+  }
+
+  // 2) GeckoTerminal fallback (pool-based)
   const pool = await topPool(mint);
   if (!pool) return cacheSet(key, good?.value ?? { trades: [] }, TRADES_TTL_MS);
 
