@@ -121,6 +121,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
   const seriesApi = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const rawCandles = useRef<{ t: number; o: number; h: number; l: number; c: number }[]>([]);
   const [pool, setPool] = useState<string | null>(null);
+  const [source, setSource] = useState<string | null>(null);
   const [candleState, setCandleState] = useState<"loading" | "live" | "stale" | "none">("loading");
 
   // supply powers the Price/MCap denomination toggle — memecoin traders think in mcap
@@ -211,6 +212,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
         .then((r) => {
           if (!alive) return;
           setPool(r.pool);
+          setSource(r.source ?? null);
           if (r.candles.length > 0) {
             rawCandles.current = r.candles;
             setCandleVer((v) => v + 1);
@@ -506,9 +508,10 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                 </span>
               )}
             </div>
-            {pool && (
+            {(source || pool) && (
               <div className="mono dimtx" style={{ fontSize: 10.5, marginTop: 6 }}>
-                candles: GeckoTerminal · pool {pool.slice(0, 10)}… · refreshes 30s
+                candles: {source === "pumpfun" ? "pump.fun" : source === "geckoterminal" ? "GeckoTerminal" : "—"}
+                {pool ? ` · pool ${pool.slice(0, 10)}…` : ""} · refreshes 30s
               </div>
             )}
           </div>
