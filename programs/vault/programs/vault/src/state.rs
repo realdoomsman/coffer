@@ -80,6 +80,36 @@ pub const MAX_NAV_STALENESS_SECONDS: i64 = SECONDS_PER_DAY;
 /// against remaining depositors.
 pub const INSTANT_WITHDRAW_MAX_NAV_STALENESS_SECONDS: i64 = 300;
 
+/// How long the posted NAV must have been stale before the permissionless
+/// emergency withdrawal path (`emergency_withdraw`) opens.
+/// WHY it exists: every normal withdrawal path gates on `assert_nav_fresh`, so
+/// a keeper that stops posting — or a platform that declines to rotate it —
+/// would otherwise freeze withdrawal ENTITLEMENT indefinitely. Entitlement
+/// must never depend on a live keeper, a responsive admin or a cooperative
+/// trader; that is the platform's core promise.
+/// WHY 7 days: the configurable window tops out at MAX_NAV_STALENESS_SECONDS
+/// (1 day), so a full week of silence is unambiguously an abandoned keeper
+/// rather than a late post, and it leaves the platform ample time to rotate
+/// the keeper (platform.rs::set_nav_keeper) before anyone has to exit on an
+/// old mark. It is also >= MAX_UNLOCK_PERIOD_SECONDS, so by the time this path
+/// opens the locked-profit drip has always fully unlocked.
+pub const NAV_EMERGENCY_GRACE_SECONDS: i64 = 7 * SECONDS_PER_DAY;
+
+/// Haircut applied to the GROSS value of shares redeemed against a stale mark
+/// through `emergency_withdraw`, before any fee crystallization.
+/// WHY: a week-old mark is not a fair price, and it is the ONE price this path
+/// can use. The haircut makes exiting on it strictly worse than waiting for a
+/// fresh post (so nobody can farm the escape hatch or arbitrage a stale-high
+/// mark), and the withheld lamports stay in NAV backing the shares that
+/// remain — the emergency exit is paid for by the depositor who takes it.
+pub const EMERGENCY_HAIRCUT_BPS: u16 = 500; // 5%
+
+/// Complement of EMERGENCY_HAIRCUT_BPS: the fraction of the stale-mark gross
+/// an emergency withdrawer is actually paid. Derived rather than written twice
+/// so the two can never drift apart, and used directly by the payout math so
+/// the rounding dust falls to the pool (see math.rs's rounding policy).
+pub const EMERGENCY_PAYOUT_BPS: u16 = 10_000 - EMERGENCY_HAIRCUT_BPS;
+
 /// Bounds on the per-post NAV delta cap (bps of previous NAV).
 pub const MIN_NAV_DELTA_BPS: u16 = 100; // 1%
 pub const MAX_NAV_DELTA_BPS: u16 = 5_000; // 50%

@@ -3,6 +3,18 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // separate cacheable vendor chunks: the chart and auth stacks are
+        // big and change far less often than app code
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          charts: ["lightweight-charts"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

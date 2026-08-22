@@ -5,66 +5,20 @@
  * silently provisions an embedded self-custodial Solana wallet (exportable
  * key — the Axiom/Photon trust pattern). Without it, a local demo user is
  * signed in so the whole UI works before any keys exist.
+ *
+ * The Privy tree lives in its own lazily-loaded chunk (PrivyAuth.tsx): it
+ * drags in WalletConnect's Ethereum provider stack, which this Solana-only
+ * platform must not make every visitor download.
  */
-import {
-  createContext,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import { PrivyProvider, usePrivy } from "@privy-io/react-auth";
+import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
+import { AuthContext, type AuthState } from "./authContext";
 
-export interface AuthUser {
-  id: string;
-  handle: string;
-  wallet?: string;
-}
-
-interface AuthState {
-  ready: boolean;
-  user: AuthUser | null;
-  demo: boolean;
-  login: () => void;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthState>({
-  ready: false,
-  user: null,
-  demo: true,
-  login: () => {},
-  logout: () => {},
-});
-
-export const useAuth = () => useContext(AuthContext);
+export type { AuthUser, AuthState } from "./authContext";
+export { useAuth } from "./useAuth";
 
 const PRIVY_APP_ID: string | undefined = import.meta.env.VITE_PRIVY_APP_ID;
 
-function PrivyBridge({ children }: { children: ReactNode }) {
-  const { ready, authenticated, user, login, logout } = usePrivy();
-  const value = useMemo<AuthState>(
-    () => ({
-      ready,
-      demo: false,
-      user:
-        ready && authenticated && user
-          ? {
-              id: user.id,
-              handle:
-                user.email?.address ??
-                user.google?.email ??
-                user.id.slice(0, 10),
-              wallet: user.wallet?.address,
-            }
-          : null,
-      login,
-      logout,
-    }),
-    [ready, authenticated, user, login, logout],
-  );
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+const PrivyAuth = lazy(() => import("./PrivyAuth"));
 
 function DemoAuth({ children }: { children: ReactNode }) {
   const [signedIn, setSignedIn] = useState(true);
@@ -85,17 +39,8 @@ function DemoAuth({ children }: { children: ReactNode }) {
 export function AuthProvider({ children }: { children: ReactNode }) {
   if (!PRIVY_APP_ID) return <DemoAuth>{children}</DemoAuth>;
   return (
-    <PrivyProvider
-      appId={PRIVY_APP_ID}
-      config={{
-        loginMethods: ["email", "google"],
-        appearance: { theme: "dark", accentColor: "#43d9a3" },
-        embeddedWallets: {
-          solana: { createOnLogin: "users-without-wallets" },
-        },
-      }}
-    >
-      <PrivyBridge>{children}</PrivyBridge>
-    </PrivyProvider>
+    <Suspense fallback={<div className="empty">Connecting your account…</div>}>
+      <PrivyAuth appId={PRIVY_APP_ID}>{children}</PrivyAuth>
+    </Suspense>
   );
 }
