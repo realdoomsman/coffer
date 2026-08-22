@@ -149,6 +149,16 @@ export interface Position {
   updatedAt: number;
 }
 
+/** One UTC day of realized pnl. Days with no closed trade are absent, not zero. */
+export interface PnlDay {
+  /** YYYY-MM-DD, UTC */
+  date: string;
+  realizedSol: number;
+  /** sells that closed against a recorded entry */
+  trades: number;
+  wins: number;
+}
+
 export interface Trade {
   id: string;
   vaultId: string;

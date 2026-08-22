@@ -5,6 +5,7 @@
 
 import type {
   EquityPoint,
+  PnlDay,
   Position,
   Trade,
   TraderProfile,
@@ -70,6 +71,59 @@ function pairTrades(trades: DbTrade[]): PairedStats {
     }
   }
   return out;
+}
+
+/**
+ * Realized pnl bucketed by UTC day.
+ *
+ * An equity curve shows where a trader ended up; a day-by-day ledger shows
+ * how they got there. One +400% day inside three months of losses is a very
+ * different trader from one who grinds — and depositors deserve to tell them
+ * apart before committing money.
+ *
+ * Uses the same average-cost pairing as the headline stats, so the calendar
+ * and the win rate can never disagree.
+ */
+export function realizedPnlByDay(trades: DbTrade[]): PnlDay[] {
+  const book = new Map<string, { tokens: number; costSol: number }>();
+  const days = new Map<string, { realizedSol: number; trades: number; wins: number }>();
+
+  for (const t of [...trades].sort((a, b) => a.ts - b.ts)) {
+    const entry = book.get(t.mint) ?? { tokens: 0, costSol: 0 };
+    if (t.side === "buy") {
+      entry.tokens += t.tokenAmount;
+      entry.costSol += t.solAmount;
+      book.set(t.mint, entry);
+      continue;
+    }
+    const sellTokens = Math.min(t.tokenAmount, entry.tokens);
+    if (sellTokens <= 0) continue; // sell with no recorded entry
+    const avgCost = entry.costSol / entry.tokens;
+    const costOut = avgCost * sellTokens;
+    const proceeds = t.solAmount * (sellTokens / t.tokenAmount);
+    const pnl = proceeds - costOut;
+    entry.tokens -= sellTokens;
+    entry.costSol -= costOut;
+    book.set(t.mint, entry);
+
+    // a day is only recorded when something CLOSED — days with open
+    // positions and no exits are genuinely blank, not zero
+    const date = new Date(t.ts * 1000).toISOString().slice(0, 10);
+    const d = days.get(date) ?? { realizedSol: 0, trades: 0, wins: 0 };
+    d.realizedSol += pnl;
+    d.trades += 1;
+    if (pnl >= 0) d.wins += 1;
+    days.set(date, d);
+  }
+
+  return [...days.entries()]
+    .map(([date, d]) => ({
+      date,
+      realizedSol: round(d.realizedSol, 4),
+      trades: d.trades,
+      wins: d.wins,
+    }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
 function traderStatsFromTrades(trades: DbTrade[]): TraderStats {

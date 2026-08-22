@@ -6,6 +6,7 @@ import type {
   Order,
   OrderKind,
   PlatformMeta,
+  PnlDay,
   PoolTrade,
   Position,
   PulseBoard,
@@ -216,6 +217,8 @@ export interface VaultDetail {
   positions: Position[];
   trades: Trade[];
   pendingWithdrawals: WithdrawRequest[];
+  /** absent on older API builds — callers must tolerate undefined */
+  pnlCalendar?: PnlDay[];
 }
 
 export interface PortfolioView {

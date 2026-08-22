@@ -4,6 +4,7 @@ import { fmtPct, fmtSol, splitPerfFeeBps, VEST_LOCK_DAYS } from "@coffer/shared"
 import { api, type VaultDetail } from "../lib/api";
 import { usePageTitle } from "../lib/hooks";
 import { AddressChip, Delta, EquityChart, Stat, StatusPill, TypePill } from "../components/bits";
+import { PnlCalendar } from "../components/PnlCalendar";
 import { PositionsTable } from "../components/PositionsTable";
 import { TradeTape } from "../components/TradeTape";
 import { DepositPanel } from "../components/DepositPanel";
@@ -118,6 +119,13 @@ export function VaultPage() {
                 return sliced.length >= 2 ? sliced : vault.equityCurve;
               })()}
             />
+          </div>
+
+          <div className="panel panel-pad" style={{ marginTop: 14 }}>
+            <div className="sectiontitle" style={{ marginTop: 0 }}>
+              Daily realized pnl
+            </div>
+            <PnlCalendar days={data.pnlCalendar ?? []} />
           </div>
         </div>
 

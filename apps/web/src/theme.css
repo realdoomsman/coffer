@@ -1005,3 +1005,62 @@ tr.rowtracked td {
   line-height: 1.45;
   color: var(--dim);
 }
+
+/* ── daily pnl calendar ──────────────────────────────────────────── */
+.pnlcal-grid {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.pnlcal-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: none;
+}
+.pnlcal-cell {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line);
+  cursor: default;
+}
+.pnlcal-cell.future {
+  border-color: transparent;
+}
+.pnlcal-cell:hover:not(.future) {
+  outline: 1px solid var(--amber);
+  outline-offset: 1px;
+}
+.pnlcal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  font-size: 11.5px;
+}
+.pnlcal-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.pnlcal-key i {
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--line);
+}
+.pnlcal-note {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+/* the grid scrolls on a phone rather than shrinking squares into mush */
+@media (max-width: 600px) {
+  .pnlcal-cell {
+    width: 11px;
+    height: 11px;
+  }
+}

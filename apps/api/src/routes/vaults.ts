@@ -22,6 +22,7 @@ import {
   assembleVault,
   assembleVaults,
   getDemoUser,
+  realizedPnlByDay,
   toPosition,
   toTrade,
   toWithdrawRequest,
@@ -30,6 +31,9 @@ import {
 export const vaultsRouter = Router();
 
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** How far back the pnl calendar reaches. Roughly a half-year of squares. */
+const CALENDAR_DAYS = 180;
 
 type SortKey = "tvl" | "pnl7d" | "pnl30d" | "pnlAll" | "age" | "sharePrice";
 
@@ -85,19 +89,24 @@ vaultsRouter.get("/:id", async (req, res, next) => {
       res.status(404).json({ error: "vault not found" });
       return;
     }
-    const [positions, trades, withdrawals] = await Promise.all([
+    // The calendar needs the whole history, not the 50 rows the tape shows —
+    // pairing a sell against its buy fails if the buy scrolled off.
+    const calendarSince = nowSec() - CALENDAR_DAYS * 86_400;
+    const [positions, trades, withdrawals, calendarTrades] = await Promise.all([
       prisma.position.findMany({ where: { vaultId: id }, orderBy: { valueSol: "desc" } }),
       prisma.trade.findMany({ where: { vaultId: id }, orderBy: { ts: "desc" }, take: 50 }),
       prisma.withdrawRequest.findMany({
         where: { vaultId: id, status: { in: ["pending", "executable"] } },
         orderBy: { requestedAt: "desc" },
       }),
+      prisma.trade.findMany({ where: { vaultId: id, ts: { gte: calendarSince } }, orderBy: { ts: "asc" } }),
     ]);
     res.json({
       vault,
       positions: positions.map(toPosition),
       trades: trades.map(toTrade),
       pendingWithdrawals: withdrawals.map(toWithdrawRequest),
+      pnlCalendar: realizedPnlByDay(calendarTrades),
     });
   } catch (err) {
     next(err);
