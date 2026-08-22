@@ -22,6 +22,27 @@ import type {
 
 const BASE = "/api";
 
+/**
+ * An API failure that keeps the server's machine-readable `code` and the
+ * rest of the JSON body. The on-chain routes answer "insufficient
+ * balance", "nav stale" and "mainnet refused" with structured detail the
+ * deposit form renders — flattening all of that to a string would throw
+ * away exactly the part the user needs to act on.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly body: Record<string, unknown>;
+
+  constructor(status: number, body: Record<string, unknown>, fallback: string) {
+    super(typeof body.error === "string" && body.error ? body.error : fallback);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = typeof body.code === "string" ? body.code : null;
+    this.body = body;
+  }
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
@@ -45,6 +66,147 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     throw new Error(detail || `${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<T>;
+}
+
+// ── authenticated calls (Privy) ────────────────────────────────────
+// Two headers, two different proofs: the ACCESS token says who you are,
+// the IDENTITY token lets the server verify which wallet is yours off
+// Privy's public JWKS. Both are verified server-side; neither is a claim
+// the API takes on trust. See apps/api/src/services/privyAuth.ts.
+
+export interface AuthTokens {
+  accessToken: string | null;
+  identityToken: string | null;
+}
+
+async function authedFetch<T>(
+  path: string,
+  tokens: AuthTokens,
+  init?: { method?: string; body?: unknown },
+): Promise<T> {
+  if (!tokens.accessToken) {
+    throw new ApiError(401, { error: "sign in first", code: "missing_token" }, "sign in first");
+  }
+  const headers: Record<string, string> = { authorization: `Bearer ${tokens.accessToken}` };
+  if (tokens.identityToken) headers["privy-id-token"] = tokens.identityToken;
+  if (init?.body !== undefined) headers["content-type"] = "application/json";
+  const res = await fetch(`${BASE}${path}`, {
+    method: init?.method ?? "GET",
+    headers,
+    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) throw new ApiError(res.status, body, `${res.status} ${res.statusText}`);
+  return body as T;
+}
+
+export interface OnChainConfig {
+  enabled: boolean;
+  cluster: string;
+  mainnetRefused: boolean;
+  privyConfigured: boolean;
+  programId: string;
+  rpcUrl: string;
+  minDepositLamports: string;
+  maxDepositSol: number;
+  depositorRentLamports: string | null;
+  feeHeadroomLamports: string;
+}
+
+export interface OnChainMe {
+  userId: string;
+  handle: string;
+  privyId: string;
+  wallet: string;
+  walletSource: "identity_token" | "privy_api";
+  explorerAddress: string;
+  balanceLamports: string;
+  balanceSol: number;
+  cluster: string;
+  depositorRentLamports: string | null;
+}
+
+export interface PreparedDeposit {
+  transaction: string;
+  encoding: "base64";
+  transactionVersion: number;
+  signed: false;
+  vaultId: string;
+  vaultPda: string;
+  programId: string;
+  depositorPda: string;
+  needsDepositorInit: boolean;
+  authority: string;
+  feePayer: string;
+  amountLamports: string;
+  amountSol: number;
+  sharesExpected: string;
+  blockhash: string;
+  lastValidBlockHeight: number;
+  cluster: string;
+  rpcUrl: string;
+  instructions: Array<{
+    index: number;
+    programId: string;
+    name: string;
+    accounts: Array<{ pubkey: string; isSigner: boolean; isWritable: boolean }>;
+  }>;
+  costs: {
+    depositLamports: string;
+    depositorRentLamports: string;
+    estimatedFeeLamports: string;
+    totalRequiredLamports: string;
+    walletBalanceLamports: string;
+  };
+}
+
+/** GET /api/vaults/:id/onchain — decoded program state, BigInts as strings. */
+export interface OnChainVaultView {
+  id: string;
+  initSig: string | null;
+  vaultPda: string;
+  explorerAddress: string;
+  vault: {
+    status: string;
+    navLamports: string;
+    navSol: number;
+    navPostedAt: number;
+    navStalenessSeconds: number;
+    totalShares: string;
+    perfFeeBps: number;
+    [k: string]: unknown;
+  };
+  depositor: {
+    shares: string;
+    netDepositsLamports: string;
+    netDepositsSol: number;
+    [k: string]: unknown;
+  } | null;
+}
+
+export interface ConfirmedDeposit {
+  recorded: "created" | "already";
+  deposit: {
+    id: string;
+    vaultId: string;
+    signature: string;
+    explorerTx: string;
+    slot: number | null;
+    authority: string;
+    vaultPda: string;
+    depositorPda: string;
+    amountLamports: string;
+    amountSol: number;
+    sharesMinted: string;
+    sharesAfter: string;
+    initDepositor: boolean;
+    createdAt: number;
+  };
+  explorerTx: string;
+  explorerDepositor?: string;
+  sharesFrom?: "program_event" | "unavailable";
+  depositor?: Record<string, unknown>;
+  cluster?: string;
 }
 
 export interface VaultDetail {
@@ -198,6 +360,33 @@ export const api = {
   },
   pulse: () => get<PulseBoard>(`/pulse`),
   tokenStats: (mint: string) => get<TokenPoolStats>(`/tokenstats/${mint}`),
+
+  // ── real, user-signed on-chain deposits ──
+  // prepare returns an UNSIGNED transaction; the user's wallet signs and
+  // broadcasts it; confirm re-verifies the signature on chain before the
+  // API will record anything.
+  onchainConfig: () => get<OnChainConfig>(`/onchain/config`),
+  /** decoded live program state; `authority` also returns that key's record */
+  vaultOnchain: (vaultId: string, authority?: string) =>
+    get<OnChainVaultView>(
+      `/vaults/${vaultId}/onchain${authority ? `?authority=${encodeURIComponent(authority)}` : ""}`,
+    ),
+  onchainMe: (tokens: AuthTokens) => authedFetch<OnChainMe>(`/onchain/me`, tokens),
+  prepareOnchainDeposit: (tokens: AuthTokens, vaultId: string, sol: number) =>
+    authedFetch<PreparedDeposit>(`/onchain/deposit/prepare`, tokens, {
+      method: "POST",
+      body: { vaultId, sol },
+    }),
+  confirmOnchainDeposit: (tokens: AuthTokens, vaultId: string, signature: string) =>
+    authedFetch<ConfirmedDeposit>(`/onchain/deposit/confirm`, tokens, {
+      method: "POST",
+      body: { vaultId, signature },
+    }),
+  onchainDeposits: (tokens: AuthTokens, vaultId?: string) =>
+    authedFetch<{ deposits: ConfirmedDeposit["deposit"][] }>(
+      `/onchain/deposits${vaultId ? `?vaultId=${encodeURIComponent(vaultId)}` : ""}`,
+      tokens,
+    ),
 
   // ── DCA orders (wire type local until shared package ships it) ──
   dcaList: async (vaultId: string) => {

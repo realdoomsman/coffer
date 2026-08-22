@@ -15,6 +15,7 @@ import { dcaRouter } from "./routes/dca.js";
 import { healthRouter } from "./routes/health.js";
 import { metaRouter } from "./routes/meta.js";
 import { ohlcvRouter } from "./routes/ohlcv.js";
+import { onchainRouter } from "./routes/onchain.js";
 import { ordersRouter } from "./routes/orders.js";
 import { poolTradesRouter } from "./routes/pooltrades.js";
 import { portfolioRouter } from "./routes/portfolio.js";
@@ -27,6 +28,7 @@ import { vaultsRouter } from "./routes/vaults.js";
 import { walletsRouter } from "./routes/wallets.js";
 import { withdrawalsRouter } from "./routes/withdrawals.js";
 import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
+import { startNavKeeper, stopNavKeeper } from "./services/navKeeper.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
 
 const app = express();
@@ -49,6 +51,7 @@ app.use("/api/activity", activityRouter);
 app.use("/api/pooltrades", poolTradesRouter);
 app.use("/api/withdrawals", withdrawalsRouter);
 app.use("/api/meta", metaRouter);
+app.use("/api/onchain", onchainRouter);
 
 // ── production: this process also serves the built web app ─────────
 // Railway runs Coffer as ONE service — the API and the Vite build come
@@ -157,6 +160,9 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/pooltrades/:mint"],
   ["POST", "/api/withdrawals/:id/execute"],
   ["GET ", "/api/meta"],
+  ["GET ", "/api/onchain/config · /api/onchain/me · /api/onchain/deposits"],
+  ["POST", "/api/onchain/deposit/prepare  (unsigned tx for the USER to sign)"],
+  ["POST", "/api/onchain/deposit/confirm  (verifies the signature on chain)"],
   ["GET ", "/api/security/:mint"],
 ];
 
@@ -170,11 +176,15 @@ const server = app.listen(env.port, env.host, () => {
   // the server — never during seed (seed.ts doesn't import this module).
   startOrderEngine();
   startMirrorEngine();
+  // Real vaults revert deposits with NavStale an hour after their last
+  // mark — this is the only thing that keeps them usable.
+  startNavKeeper();
 });
 
 function shutdown(): void {
   stopOrderEngine();
   stopMirrorEngine();
+  stopNavKeeper();
   server.close(() => process.exit(0));
   // failsafe if a keep-alive socket stalls close()
   setTimeout(() => process.exit(0), 3_000).unref();

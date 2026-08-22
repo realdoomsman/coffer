@@ -13,7 +13,7 @@
 import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
 import { AuthContext, type AuthState } from "./authContext";
 
-export type { AuthUser, AuthState } from "./authContext";
+export type { AuthUser, AuthState, WalletBridge } from "./authContext";
 export { useAuth } from "./useAuth";
 
 const PRIVY_APP_ID: string | undefined = import.meta.env.VITE_PRIVY_APP_ID;
@@ -28,6 +28,10 @@ function DemoAuth({ children }: { children: ReactNode }) {
       demo: true,
       // no fake wallet address — a real one arrives with Privy
       user: signedIn ? { id: "demo-user", handle: "you" } : null,
+      // no keys exist in demo mode, so there is nothing that can sign a
+      // real deposit. Null, not a stub: the deposit UI must be able to
+      // tell the difference and say so.
+      wallet: null,
       login: () => setSignedIn(true),
       logout: () => setSignedIn(false),
     }),

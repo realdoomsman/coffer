@@ -30,6 +30,14 @@ model User {
   xHandle     String?
   avatarUrl   String?
   bio         String?
+  // ── the user's SELF-CUSTODIAL Solana wallet (Privy embedded) ──────
+  // Base58 pubkey, learned from a CRYPTOGRAPHICALLY VERIFIED Privy
+  // identity token (or the Privy server API) — never from a client
+  // claim, because it is the `authority` of that user's VaultDepositor
+  // PDA and therefore the on-chain owner of their shares. The server
+  // never holds the matching secret key: it only ever builds unsigned
+  // transactions naming this address as authority + fee payer.
+  walletAddress String?
   createdAt   DateTime @default(now())
 
   vaults           Vault[]
@@ -37,6 +45,9 @@ model User {
   withdrawRequests WithdrawRequest[]
   trackedWallets   TrackedWallet[]
   vaultDepositors  VaultDepositor[]
+  onchainDeposits  OnChainDeposit[]
+
+  @@index([walletAddress])
 }
 
 model Vault {
@@ -92,6 +103,7 @@ model Vault {
   orders           Order[]
   dcaOrders        DcaOrder[]
   vaultDepositors  VaultDepositor[]
+  onchainDeposits  OnChainDeposit[]
 
   @@index([traderId])
   @@index([type, status])
@@ -215,6 +227,45 @@ model VaultDepositor {
 
   @@unique([vaultId, userId])
   @@index([userId])
+}
+
+// A REAL, user-signed on-chain deposit. This table is an INDEX of
+// confirmed transactions, never a balance: the authority's shares live in
+// the VaultDepositor PDA and are always read back from the chain. A row
+// only ever appears after /api/onchain/deposit/confirm has fetched the
+// transaction from the cluster and verified that it succeeded, ran OUR
+// program, and touched this vault's PDA — a client-reported signature is
+// never trusted on its own.
+//
+// u64 / u128 chain quantities are stored as decimal STRINGS: shares are
+// u128 (Float would silently lose precision, and neither SQLite nor
+// Postgres has a 128-bit integer), and the schema is scalar-only for
+// Postgres portability.
+model OnChainDeposit {
+  id             String   @id @default(cuid())
+  vaultId        String
+  vault          Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  /** the transaction signature — the idempotency key for confirm */
+  signature      String   @unique
+  slot           Int?
+  /** base58 pubkey that signed as `authority` (the user's own wallet) */
+  authority      String
+  vaultPda       String
+  depositorPda   String
+  amountLamports String
+  /** shares the chain minted, from the program's Deposited event */
+  sharesMinted   String
+  /** the depositor's total shares AFTER this deposit, re-read on-chain */
+  sharesAfter    String
+  /** true when this transaction also created the VaultDepositor PDA */
+  initDepositor  Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([vaultId])
+  @@index([userId])
+  @@index([authority])
 }
 
 model WithdrawRequest {

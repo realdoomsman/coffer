@@ -1,10 +1,17 @@
 import { useState } from "react";
 import { fmtSol, type Vault } from "@coffer/shared";
 import { api } from "../lib/api";
+import { RealDepositPanel } from "./RealDepositPanel";
 
 /**
- * Deposit / withdraw panel. P0 wires the demo ledger; the real flow signs a
- * vault-program deposit with the user's embedded wallet via Privy.
+ * Deposit / withdraw panel.
+ *
+ * Two completely separate worlds, and the split is deliberate:
+ *   · mode "real"  → RealDepositPanel. A vault-program deposit signed by
+ *                    the user's own Privy wallet. Nothing below this line
+ *                    runs for it — the demo ledger never sees real money
+ *                    (the API 409s those routes for real vaults anyway).
+ *   · mode "paper" → the ledger sandbox that follows.
  */
 export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: () => void }) {
   const [tab, setTab] = useState<"deposit" | "withdraw">("deposit");
@@ -53,19 +60,7 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
   }
 
   if (vault.mode === "real") {
-    return (
-      <div className="panel panel-pad">
-        <div className="sectiontitle" style={{ marginTop: 0 }}>
-          Deposit <span className="pill real" style={{ marginLeft: 6 }}>real SOL</span>
-        </div>
-        <div className="callout">
-          This vault only ever moves real SOL on-chain — nothing here is simulated, so deposits
-          stay closed until launch. <strong>The vault program is live on devnet</strong> — what
-          remains is signing as you (Privy) and a funded NAV keeper, then funding opens. The vault
-          page, thesis, and terms are live now so depositors can find it early.
-        </div>
-      </div>
-    );
+    return <RealDepositPanel vault={vault} onChanged={onChanged} />;
   }
 
   return (
