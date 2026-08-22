@@ -64,8 +64,19 @@ if (env.serveStatic) {
 
   if (existsSync(INDEX_HTML)) {
     // Vite emits content-hashed asset filenames → cache them hard.
-    // index.html is served by hand below so it never goes stale.
-    app.use(express.static(WEB_DIST, { index: false, maxAge: "1y" }));
+    // index.html is the one file that must never be cached: it names the
+    // hashed bundles, so a stale copy pins the browser to a dead deploy.
+    app.use(
+      express.static(WEB_DIST, {
+        index: false,
+        maxAge: "1y",
+        setHeaders(res, filePath) {
+          if (filePath.endsWith("index.html")) {
+            res.setHeader("Cache-Control", "no-cache");
+          }
+        },
+      }),
+    );
 
     // SPA catch-all: every non-/api GET is a client-side route
     // (/explore, /vault/:id, /portfolio …). Hand back index.html so a
@@ -74,6 +85,10 @@ if (env.serveStatic) {
     app.use((req: Request, res: Response, next: NextFunction) => {
       if (req.method !== "GET" && req.method !== "HEAD") return next();
       if (req.path === "/api" || req.path.startsWith("/api/")) return next();
+      // /assets/* is build output, never a client route. A missing file
+      // there must 404 loudly — handing back index.html would surface as
+      // a baffling "MIME type text/html" script error in the browser.
+      if (req.path.startsWith("/assets/")) return next();
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(INDEX_HTML, (err) => {
         if (err) next(err);

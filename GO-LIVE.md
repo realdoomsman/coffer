@@ -16,7 +16,17 @@ says exactly what is done, what is missing, and who has to do it.
 | Deploy script | `scripts/deploy-devnet.sh` — one command |
 | Security blockers H1/H2 | **fixed in source** (see `programs/vault/REVIEW-FINDINGS.md`) |
 
-## 1. Compile + deploy the program — needs ONE admin command from you
+## 1. Program — DEPLOYED TO DEVNET ✅
+
+Program id `8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U`, 532,088 bytes,
+upgrade authority `7UxfASUxKNkmTcJyiibRkxSiQ963qHg7ywrtEYumgKVk`.
+https://explorer.solana.com/address/8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U?cluster=devnet
+
+Built natively on Windows (no WSL — its virtualization gate never cleared):
+MSVC Build Tools + Windows SDK, with `LIB` set to the MSVC and SDK lib
+dirs. `scripts/wsl-build-deploy.sh` is kept only as the Linux/CI path.
+
+### Historical: the WSL route that did not work
 
 The vault program's dependencies (serde, zerocopy…) run build scripts that
 must link a native Windows executable. That needs a host C linker, and this
