@@ -268,6 +268,13 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
   const [candleVer, setCandleVer] = useState(0);
   /** Chart subject last auto-framed — see the fit guard below. */
   const fitKey = useRef<string>("");
+  /**
+   * Newest bar time written to the series. lightweight-charts throws if
+   * update() is handed a time older than the last one it saw, and the
+   * candle feed can hand back a window that ends BEHIND a bar we already
+   * drew — so every update() is gated on this rather than on our own clock.
+   */
+  const lastSeriesTime = useRef<number>(0);
   /** Average-entry line, redrawn whenever the position or scale changes. */
   const avgLine = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
 
@@ -333,6 +340,8 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
         close: c.c * scale,
       })),
     );
+    lastSeriesTime.current = clean[clean.length - 1]?.t ?? 0;
+
     // every enabled layer, merged into one strictly-ordered series
     const first = clean[0]?.t ?? 0;
     series.setMarkers(
@@ -440,6 +449,8 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     }
 
     const bar = bars[bars.length - 1]!;
+    if (bar.t < lastSeriesTime.current) return; // would throw
+    lastSeriesTime.current = bar.t;
     const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
     const scale = mcapMode ? supplyUi : 1;
     series.update({
