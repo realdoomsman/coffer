@@ -4,10 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npm run start",
-    "healthcheckPath": "/api/health",
-    "healthcheckTimeout": 600,
-    "restartPolicyType": "ON_FAILURE",
-    "sleepApplication": 30000
+    "startCommand": "npm start",
+    "healthcheckPath": "/api/health"
   }
 }
