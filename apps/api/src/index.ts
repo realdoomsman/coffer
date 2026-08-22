@@ -132,6 +132,8 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/vaults/:id"],
   ["GET ", "/api/vaults/:id/mirror"],
   ["POST", "/api/vaults"],
+  ["GET ", "/api/vaults/:id/onchain?authority="],
+  ["POST", "/api/vaults/:id/onchain/deposit"],
   ["POST", "/api/vaults/:id/deposit"],
   ["POST", "/api/vaults/:id/withdraw"],
   ["POST", "/api/vaults/:id/trade"],

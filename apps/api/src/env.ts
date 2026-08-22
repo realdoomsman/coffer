@@ -116,6 +116,28 @@ export const env = {
   get solanaRpcUrl(): string {
     return str("SOLANA_RPC_URL", "https://api.devnet.solana.com");
   },
+  /**
+   * Deployed Coffer vault program. The default is the live devnet
+   * deployment — hardcoding it (rather than requiring the env var) keeps a
+   * fresh clone able to READ on-chain vault state with zero setup, and the
+   * program id is public information, not a secret.
+   */
+  get vaultProgramId(): string {
+    return str("VAULT_PROGRAM_ID", "8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U");
+  },
+  /** Cluster the vault program is read/written on — drives explorer links. */
+  get solanaCluster(): string {
+    return str("SOLANA_CLUSTER", "devnet");
+  },
+  /**
+   * Server keypair used for PLATFORM signing (on devnet it is also the
+   * admin, the trader and the NAV keeper). Empty = the Solana CLI default,
+   * ~/.config/solana/id.json, resolved in signer.ts so this getter stays
+   * a pure string read.
+   */
+  get solanaKeypairPath(): string {
+    return str("SOLANA_KEYPAIR_PATH", str("SOLANA_KEYPAIR", ""));
+  },
   /** Public mainnet RPC for read-only wallet scans (keyless works, rate-limited). */
   get mainnetRpcUrl(): string {
     return str("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com");

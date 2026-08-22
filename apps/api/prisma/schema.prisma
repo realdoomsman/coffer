@@ -73,6 +73,16 @@ model Vault {
   traderFeesAccruedSol   Float @default(0)
   platformFeesAccruedSol Float @default(0)
 
+  // ── on-chain link (mode = "real" only) ────────────────────────────
+  // Set when init_vault lands on the deployed program. The PDA is
+  // derived from ["vault", <32-byte name>] where the name is this row's
+  // id, so it is re-derivable and never has to be trusted from the DB;
+  // it is stored anyway so reads and explorer links cost no derivation.
+  // null on a real vault = the row exists but nothing is on-chain yet
+  // (server keypair unavailable at creation time).
+  onchainVaultPda  String? @unique
+  onchainInitSig   String?
+
   equityPoints     EquityPoint[]
   positions        Position[]
   trades           Trade[]

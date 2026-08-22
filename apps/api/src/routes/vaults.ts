@@ -9,6 +9,13 @@ import {
 import { Router } from "express";
 import { prisma } from "../db.js";
 import { crystallize } from "../services/fees.js";
+import {
+  depositOnChain,
+  initVaultOnChain,
+  readOnChainVault,
+} from "../services/onchainVaults.js";
+import { MIN_DEPOSIT_LAMPORTS, solToLamports } from "../services/program.js";
+import { OnChainError, getServerPublicKey, tryGetServerKeypair } from "../services/signer.js";
 import { executeTrade, REAL_VAULT_WALL, TradeError } from "../services/trading.js";
 import {
   assembleVault,
@@ -263,8 +270,56 @@ vaultsRouter.post("/", async (req, res, next) => {
       update: { v: 1 },
       create: { vaultId: created.id, t: t0, v: 1 },
     });
+
+    // ── real vaults are created ON-CHAIN, not in this database ───────
+    // The row above is an index entry; init_vault is what actually
+    // creates the vault. The PDA seed is the row id, so the account is
+    // re-derivable from the row alone.
+    //
+    // Failure policy: if the program rejects init_vault, the row is
+    // DELETED and the request fails — a "real" vault with no on-chain
+    // account would be a lie that the deposit path could not honour.
+    // The one tolerated gap is a missing server keypair (prod has none
+    // yet): the row survives, onchain stays null, and the response says
+    // so out loud.
+    let onchain: Record<string, unknown> | null = null;
+    if (vaultMode === "real") {
+      const key = tryGetServerKeypair();
+      if ("error" in key) {
+        onchain = { status: "skipped", reason: key.error };
+        console.warn(`[api] vault ${created.id} created OFF-chain only: ${key.error}`);
+      } else {
+        try {
+          const result = await initVaultOnChain({
+            id: created.id,
+            type,
+            perfFeeBps: fee,
+            redeemWindowHours: 24,
+          });
+          await prisma.vault.update({
+            where: { id: created.id },
+            data: {
+              onchainVaultPda: result.vaultPda,
+              onchainInitSig: result.signature || null,
+            },
+          });
+          onchain = { status: result.signature ? "created" : "already_existed", ...result };
+        } catch (err) {
+          await prisma.vault.delete({ where: { id: created.id } }).catch(() => {});
+          if (err instanceof OnChainError) {
+            res.status(502).json({ error: "on-chain vault creation failed", ...err.toJson() });
+            return;
+          }
+          res.status(502).json({
+            error: `on-chain vault creation failed: ${(err as Error).message}`,
+          });
+          return;
+        }
+      }
+    }
+
     const vault = await assembleVault(created.id);
-    res.status(201).json({ vault });
+    res.status(201).json({ vault, ...(onchain ? { onchain } : {}) });
   } catch (err) {
     next(err);
   }
@@ -495,6 +550,121 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
   } catch (err) {
     if (err instanceof TradeError) {
       res.status(err.status).json(err.body ?? { error: err.message });
+      return;
+    }
+    next(err);
+  }
+});
+
+// ── EXPLICITLY ON-CHAIN ROUTES ──────────────────────────────────────
+// The only routes a real vault may use. Everything else in this file
+// keeps hitting THE WALL (REAL_VAULT_WALL) for real vaults — these do
+// not weaken it, they are the other side of it: they never touch the
+// demo ledger, they only build, sign and send program instructions and
+// read the resulting account state back.
+
+// GET /api/vaults/:id/onchain — decoded live program state for a real
+// vault. `?authority=<base58>` also returns that key's VaultDepositor
+// record (defaults to the server key, which is the depositor of record
+// for server-signed devnet deposits).
+vaultsRouter.get("/:id/onchain", async (req, res, next) => {
+  try {
+    const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
+    if (!dbVault) {
+      res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (dbVault.mode !== "real") {
+      res.status(409).json({ error: "paper vaults have no on-chain state" });
+      return;
+    }
+    if (!dbVault.onchainVaultPda) {
+      res.status(409).json({ error: "vault has no on-chain account (init_vault never landed)" });
+      return;
+    }
+    const authorityParam = req.query.authority;
+    let authority: string | undefined;
+    if (typeof authorityParam === "string" && authorityParam.length > 0) {
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(authorityParam)) {
+        res.status(400).json({ error: "authority must be a base58 pubkey" });
+        return;
+      }
+      authority = authorityParam;
+    } else {
+      const key = tryGetServerKeypair();
+      authority = "error" in key ? undefined : key.keypair.publicKey.toBase58();
+    }
+    const view = await readOnChainVault(dbVault.onchainVaultPda, authority);
+    if (!view) {
+      res.status(502).json({
+        error: "on-chain vault account not found",
+        vaultPda: dbVault.onchainVaultPda,
+      });
+      return;
+    }
+    res.json({ id: dbVault.id, initSig: dbVault.onchainInitSig, ...view });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/vaults/:id/onchain/deposit { sol } — REAL on-chain deposit.
+//
+// ⚠ DEVNET PROOF PATH: the SERVER keypair signs, so the shares are
+// credited to the platform's own key, not to a user. This is deliberate
+// and temporary — it proves init_depositor + deposit execute against the
+// deployed program. USER deposits (signed by the user's Privy embedded
+// wallet, so the VaultDepositor PDA belongs to the USER) are a separate
+// task: the instructions built here are already byte-for-byte the ones
+// the user would sign; what is missing is the signature, not the client.
+vaultsRouter.post("/:id/onchain/deposit", async (req, res, next) => {
+  try {
+    const sol = Number((req.body ?? {}).sol);
+    if (!Number.isFinite(sol) || sol <= 0) {
+      res.status(400).json({ error: "sol must be a positive number" });
+      return;
+    }
+    if (sol > 1_000) {
+      res.status(400).json({ error: "sol exceeds the on-chain deposit ceiling (1000)" });
+      return;
+    }
+    const lamports = solToLamports(sol);
+    if (lamports < MIN_DEPOSIT_LAMPORTS) {
+      res.status(400).json({ error: `deposit must be at least ${MIN_DEPOSIT_LAMPORTS} lamports` });
+      return;
+    }
+    const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
+    if (!dbVault) {
+      res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    if (dbVault.mode !== "real") {
+      res.status(409).json({ error: "this route is on-chain only; paper vaults use /deposit" });
+      return;
+    }
+    if (!dbVault.onchainVaultPda) {
+      res.status(409).json({ error: "vault has no on-chain account (init_vault never landed)" });
+      return;
+    }
+    const key = tryGetServerKeypair();
+    if ("error" in key) {
+      res.status(503).json({ error: `server signer unavailable: ${key.error}` });
+      return;
+    }
+    const result = await depositOnChain({
+      vaultPda: dbVault.onchainVaultPda,
+      amountLamports: lamports,
+    });
+    res.status(201).json({
+      vaultId: dbVault.id,
+      vaultPda: dbVault.onchainVaultPda,
+      signedBy: getServerPublicKey().toBase58(),
+      signerRole: "server_keypair_devnet_proof",
+      ...result,
+    });
+  } catch (err) {
+    if (err instanceof OnChainError) {
+      res.status(502).json({ error: "on-chain deposit failed", ...err.toJson() });
       return;
     }
     next(err);

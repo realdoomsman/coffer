@@ -29,6 +29,8 @@ then `apps/api/.env`, with real environment variables winning.
 | POST | `/api/vaults` | Create vault `{ name, type, perfFeeBps?, thesis?, leaderWallet? }` (demo user becomes trader) |
 | POST | `/api/vaults/:id/deposit` | `{ sol }` — demo ledger deposit (mints shares at current share price) |
 | POST | `/api/vaults/:id/withdraw` | `{ shares }` — instant if the SOL buffer covers it, else windowed by `redeemWindowHours` |
+| GET | `/api/vaults/:id/onchain` | **Real vaults only.** Decoded live `Vault` (+ `VaultDepositor` for `?authority=`) read straight off the deployed program |
+| POST | `/api/vaults/:id/onchain/deposit` | **Real vaults only.** `{ sol }` — builds `init_depositor` (when needed) + `deposit` and sends them on-chain. Signed by the SERVER key today, so the shares belong to the platform's key: a devnet proof, not the user path |
 | GET | `/api/tokens/:mint` | Price oracle → shared `TokenInfo` |
 | GET | `/api/tokens?ids=a,b,c` | Batched oracle lookup (max 50 mints) |
 | GET | `/api/portfolio` | Demo user holdings (`Holding[]`) + withdraw requests |
@@ -58,6 +60,35 @@ contract between web and api.
 - **Vault stats are computed, not stored** — pnl/drawdown from the
   equity curve, win rate from average-cost trade pairing, median copy
   lag from mirror trades (see `src/services/vaults.ts`).
+
+## On-chain client (real vaults)
+
+Real vaults are objects on the deployed Anchor program
+(`8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U`, devnet); their DB row
+is only an index entry plus `onchainVaultPda` / `onchainInitSig`.
+
+- `src/services/program.ts` — no IDL exists, so this is the hand-rolled
+  client: sighash discriminators, PDA derivations, borsh codecs for
+  `Vault` / `VaultDepositor` / `PlatformConfig`, and instruction builders
+  (`init_vault`, `init_depositor`, `deposit`, `post_nav`). Builders are
+  pure: they return a `TransactionInstruction` and never sign.
+- `src/services/signer.ts` — loads `SOLANA_KEYPAIR_PATH` (default
+  `~/.config/solana/id.json`), builds/signs/simulates/sends v0
+  transactions, and throws `OnChainError` **carrying the program log
+  lines** on every failure path.
+- `src/services/onchainVaults.ts` — `initVaultOnChain`,
+  `depositOnChain`, `readOnChainVault`. Never writes ledger columns:
+  chain share units (~1e12 per SOL) are not paper share units (~1.0).
+- Env: `VAULT_PROGRAM_ID`, `SOLANA_CLUSTER`, `SOLANA_KEYPAIR_PATH`,
+  `SOLANA_RPC_URL`.
+- Proof: `npx tsx scripts/onchain-vault-e2e.mjs` (repo root) creates a
+  vault, deposits, decodes both accounts back and posts a NAV mark on
+  devnet, asserting the numbers against `math.rs`. `E2E_SIMULATE=1`
+  dry-runs it for free.
+
+Deposits are signed by the SERVER key for now, so the shares belong to
+the platform's key — the user path needs the user's wallet signature
+(Privy), not more client code.
 
 ## Price oracle
 
