@@ -26,6 +26,12 @@ const POOL_MISS_TTL_MS = 30_000; // failed lookups retry sooner
  * frozen; a 1h chart doesn't need that pace and shouldn't pay for it.
  */
 const OHLCV_TTL_BY_TF: Record<Timeframe, number> = {
+  // The upstream is itself 2-7s behind wall clock on an active token, so
+  // polling faster than ~1s buys nothing and just burns rate limit. One
+  // cache entry serves every viewer of the same token.
+  "1s": 1_000,
+  "15s": 4_000,
+  "30s": 8_000,
   "1m": 5_000,
   "5m": 10_000,
   "15m": 20_000,
@@ -34,10 +40,20 @@ const OHLCV_TTL_BY_TF: Record<Timeframe, number> = {
 const OHLCV_TTL_FALLBACK_MS = 30_000;
 const ttlFor = (tf: Timeframe): number => OHLCV_TTL_BY_TF[tf] ?? OHLCV_TTL_FALLBACK_MS;
 
-export const TIMEFRAMES = ["1m", "5m", "15m", "1h"] as const;
+// pump.fun's own validator reports its accepted set as:
+//   1s, 15s, 30s, 1m, 5m, 15m, 30m, 1h, 4h, 6h, 12h, 24h
+// (note 5s and 10s are NOT accepted). We expose the sub-minute end because
+// that is where memecoin entries are actually decided.
+export const TIMEFRAMES = ["1s", "15s", "30s", "1m", "5m", "15m", "1h"] as const;
 export type Timeframe = (typeof TIMEFRAMES)[number];
 
+// GeckoTerminal's finest granularity is one minute. Sub-minute timeframes
+// map to it so the fallback still draws SOMETHING, but the result is
+// labelled by source so the UI can say the chart is coarser than asked.
 const TF_MAP: Record<Timeframe, { timeframe: "minute" | "hour"; aggregate: number }> = {
+  "1s": { timeframe: "minute", aggregate: 1 },
+  "15s": { timeframe: "minute", aggregate: 1 },
+  "30s": { timeframe: "minute", aggregate: 1 },
   "1m": { timeframe: "minute", aggregate: 1 },
   "5m": { timeframe: "minute", aggregate: 5 },
   "15m": { timeframe: "minute", aggregate: 15 },
@@ -105,10 +121,31 @@ const PUMP_CANDLES_BASE = "https://swap-api.pump.fun/v1/coins";
 
 /** pump.fun interval slugs map 1:1 onto ours. */
 const PUMP_TF: Record<Timeframe, string> = {
+  "1s": "1s",
+  "15s": "15s",
+  "30s": "30s",
   "1m": "1m",
   "5m": "5m",
   "15m": "15m",
   "1h": "1h",
+};
+
+/**
+ * How many bars to ask for, per timeframe.
+ *
+ * pump.fun caps limit at 1000. Sub-minute bars are emitted only for seconds
+ * that actually traded, so a 1s request covering a useful stretch of wall
+ * time needs far more rows than a 1h one — 600 one-second bars is roughly
+ * ten minutes on a busy token and much longer on a quiet one.
+ */
+const PUMP_LIMIT: Record<Timeframe, number> = {
+  "1s": 600,
+  "15s": 400,
+  "30s": 300,
+  "1m": 200,
+  "5m": 200,
+  "15m": 200,
+  "1h": 200,
 };
 
 interface PumpCandleRow {
@@ -133,7 +170,7 @@ const num = (v: unknown): number => {
 async function pumpCandles(mint: string, tf: Timeframe): Promise<Candle[]> {
   try {
     const res = await fetch(
-      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=200&currency=USD`,
+      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=${PUMP_LIMIT[tf]}&currency=USD`,
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
     );
     if (!res.ok) return [];

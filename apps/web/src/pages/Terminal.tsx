@@ -34,7 +34,7 @@ import { Skeleton } from "../components/bits";
 import { TokenFacts } from "../components/TokenFacts";
 import { RatioBar, TimeframeStrip } from "../components/market";
 
-const TFS = ["1m", "5m", "15m", "1h"] as const;
+const TFS = ["1s", "15s", "30s", "1m", "5m", "15m", "1h"] as const;
 type Tf = (typeof TFS)[number];
 
 /**
@@ -43,9 +43,22 @@ type Tf = (typeof TFS)[number];
  * faster poll here never costs an extra upstream call.
  */
 /** Bar width in seconds — used to bucket the forming candle. */
-const TF_SECONDS: Record<Tf, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3_600 };
+const TF_SECONDS: Record<Tf, number> = {
+  "1s": 1,
+  "15s": 15,
+  "30s": 30,
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "1h": 3_600,
+};
 
 const CANDLE_POLL_MS: Record<Tf, number> = {
+  // Upstream sits 2-7s behind wall clock even on a busy token, so polling
+  // a 1s chart faster than ~1.2s only spends rate limit.
+  "1s": 1_200,
+  "15s": 4_000,
+  "30s": 8_000,
   "1m": 5_000,
   "5m": 10_000,
   "15m": 20_000,
@@ -245,6 +258,13 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
   );
 
 
+  /** Below a minute the axis must print seconds or every bar reads the same. */
+  useEffect(() => {
+    chartApi.current?.applyOptions({
+      timeScale: { timeVisible: true, secondsVisible: TF_SECONDS[tf] < 60 },
+    });
+  }, [tf]);
+
   const [candleVer, setCandleVer] = useState(0);
   /** Chart subject last auto-framed — see the fit guard below. */
   const fitKey = useRef<string>("");
@@ -397,6 +417,16 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     if (!last) return; // nothing charted yet — wait for the first fetch
 
     const width = TF_SECONDS[tf];
+    // Sub-minute charts do NOT get a synthetic bar.
+    //
+    // At a 1-minute width, extending the open bar from a live price mark is
+    // fair: that minute is genuinely still forming and the price is real.
+    // At a 1-second width it is not — pump.fun emits a 1s bar only for
+    // seconds that actually traded, so appending one for the current second
+    // would draw a print that never happened. The upstream is already ~2-3s
+    // behind here and polled every 1.2s, so there is nothing to gain by
+    // faking the gap.
+    if (width < 60) return;
     const bucket = Math.floor(Date.now() / 1000 / width) * width;
     // a bucket behind the newest bar means upstream is ahead of us; leave it
     if (bucket < last.t) return;
@@ -747,7 +777,13 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
             {(source || pool) && (
               <div className="mono dimtx" style={{ fontSize: 10.5, marginTop: 6 }}>
                 candles: {source === "pumpfun" ? "pump.fun" : source === "geckoterminal" ? "GeckoTerminal" : "—"}
-                {pool ? ` · pool ${pool.slice(0, 10)}…` : ""} · refreshes 30s
+                {pool ? ` · pool ${pool.slice(0, 10)}…` : ""}
+                {` · refreshes ${CANDLE_POLL_MS[tf] / 1000}s`}
+                {source === "geckoterminal" && TF_SECONDS[tf] < 60 && (
+                  // GeckoTerminal has no sub-minute granularity — say so
+                  // rather than letting a 1m chart pass as a 1s one
+                  <span className="neg"> · 1m bars (source has no sub-minute)</span>
+                )}
               </div>
             )}
           </div>

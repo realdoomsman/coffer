@@ -212,6 +212,13 @@ export interface ConfirmedDeposit {
   cluster?: string;
 }
 
+/**
+ * Chart timeframes. Mirrors the API's TIMEFRAMES, which in turn mirrors the
+ * subset of pump.fun's accepted intervals we expose. Sub-minute is the point
+ * — memecoin entries are decided there, not on the 1m.
+ */
+export type ChartTimeframe = "1s" | "15s" | "30s" | "1m" | "5m" | "15m" | "1h";
+
 export interface VaultDetail {
   vault: Vault;
   positions: Position[];
@@ -295,7 +302,7 @@ export const api = {
       | { side: "buy"; mint: string; solAmount: number }
       | { side: "sell"; mint: string; sellFraction: number },
   ) => post<TradeResult>(`/vaults/${vaultId}/trade`, body),
-  ohlcv: async (mint: string, tf: "1m" | "5m" | "15m" | "1h") => {
+  ohlcv: async (mint: string, tf: ChartTimeframe) => {
     const r = await get<{ candles: Candle[]; pool: string | null; source?: "pumpfun" | "geckoterminal"; stale?: boolean; fetchedAt?: number }>(
       `/ohlcv/${mint}?tf=${tf}`,
     );
