@@ -1,0 +1,14 @@
+[IMAGE: NONE]
+Live on devnet: 1-second charts
+
+Sub-minute data from Birdeye. Trade-time bars (no fabricated prints). Live price, timeframe strip, buys/sells pressure, gas receipts.
+
+Position-based limit orders that rescale automatically when you top up or exit partially.
+
+Mirror engine copying real mainnet leaders is running live.
+
+devnet now → mainnet after audit.
+
+coffer.fun/terminal
+
+#Solana #DeFi #Trading #Devnet

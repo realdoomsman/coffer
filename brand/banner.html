@@ -1,37 +1,131 @@
 <!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{width:1500px;height:500px;overflow:hidden}
-  body{background:#0a0a08;position:relative;font-family:"IBM Plex Mono",monospace;color:#e9e6da}
-  body::before{content:"";position:absolute;inset:0;
-    background-image:radial-gradient(rgba(233,230,218,.05) 1.5px,transparent 1.5px);
-    background-size:26px 26px}
-  /* X overlays the avatar bottom-LEFT and crops top/bottom on mobile:
-     keep everything vertically centred and clear of the left 380px. */
-  .wrap{position:relative;height:100%;display:flex;align-items:center;
-        padding-left:400px;padding-right:70px}
-  .eyebrow{font-size:19px;letter-spacing:.30em;text-transform:uppercase;color:#ffb000;margin-bottom:22px}
-  h1{font-family:"Space Mono",monospace;font-weight:700;font-size:62px;line-height:1.08;
-     text-transform:uppercase;letter-spacing:.01em;margin-bottom:20px}
-  h1 .a{color:#ffb000}
-  .sub{font-size:21px;color:#9a968a;letter-spacing:.01em}
-  .rule{width:96px;height:4px;background:#ffb000;margin:26px 0 24px}
-  .facts{display:flex;gap:14px}
-  .fact{border:1px solid #38382f;padding:9px 15px;font-size:16px;color:#9a968a;letter-spacing:.04em}
-  .fact b{color:#e9e6da;font-weight:600}
-  .url{position:absolute;right:70px;bottom:52px;font-size:20px;color:#ffb000;letter-spacing:.10em}
-</style></head><body>
-<div class="wrap"><div>
-  <div class="eyebrow">Trader vaults on Solana</div>
-  <h1>Back the best traders.<br><span class="a">They can never run.</span></h1>
-  <div class="rule"></div>
-  <div class="facts">
-    <div class="fact"><b>70%</b> to depositors</div>
-    <div class="fact">Traders trade. <b>They can't withdraw.</b></div>
-    <div class="fact"><b>Every record</b> on-chain</div>
-  </div>
-</div></div>
-<div class="url">coffer.fun</div>
-</body></html>
+<style>body{background:#181818;margin:0;padding:16px;font-family:monospace;color:#eee}
+canvas{display:block;margin:8px 0;max-width:100%}
+.lbl{font-size:12px;color:#9a968a;margin-top:14px}</style>
+</head><body>
+<div class="lbl">banner 1500×500 — rings echo the pfp</div>
+<canvas id="banner" width="1500" height="500"></canvas>
+<script>
+/* Palette sampled to match the supplied pfp. */
+const INK    = "#000000";
+const GREY   = "#3c3c3c";
+const GREY_HI= "#4e4e4e";
+const AMBER  = "#f9a81b";
+const GOLD   = "#a87d22";
+const TEXT   = "#ffffff";
+const MUTED  = "#8c8c8c";
+const LINE   = "#333333";
+
+/* Concentric band structure read off the pfp, as fractions of the radius.
+   Outermost first. Reused verbatim so the banner mark is the SAME object
+   as the avatar, just larger and cropped. */
+const BANDS = [
+  [1.00, 0.82, GREY ],
+  [0.82, 0.63, AMBER],
+  [0.63, 0.52, INK  ],
+  [0.52, 0.44, AMBER],
+  [0.44, 0.19, GOLD ],
+  [0.19, 0.00, INK  ],
+];
+
+function rings(ctx, cx, cy, R, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  for (const [outer, inner, color] of BANDS){
+    ctx.beginPath();
+    ctx.arc(cx, cy, R*outer, 0, Math.PI*2);
+    if (inner > 0){ ctx.arc(cx, cy, R*inner, 0, Math.PI*2, true); }
+    ctx.fillStyle = color;
+    ctx.fill("evenodd");
+  }
+  // the pfp's outer ring carries a soft bevel — light at the top edge
+  const g = ctx.createLinearGradient(cx-R, cy-R, cx+R*0.4, cy+R);
+  g.addColorStop(0, "rgba(255,255,255,0.16)");
+  g.addColorStop(0.35, "rgba(255,255,255,0)");
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.arc(cx, cy, R*0.82, 0, Math.PI*2, true);
+  ctx.fillStyle = g;
+  ctx.fill("evenodd");
+  ctx.restore();
+}
+
+function draw(){
+  const c = document.getElementById('banner'), ctx = c.getContext('2d');
+  const W = 1500, H = 500;
+  ctx.fillStyle = INK; ctx.fillRect(0,0,W,H);
+
+  // dot grid, very faint — same texture as the app
+  ctx.fillStyle = "rgba(255,255,255,0.045)";
+  for(let y=13;y<H;y+=26) for(let x=13;x<W;x+=26){
+    ctx.beginPath(); ctx.arc(x,y,1.4,0,Math.PI*2); ctx.fill();
+  }
+
+  // ── the mark ─────────────────────────────────────────────────────
+  // Sized to sit WHOLE inside the mobile crop band (y 90..410) so the
+  // profile picture and the banner show the same object, uncut. Reading
+  // as the same object is the job here; a dramatic bleed that slices the
+  // rings differently on every viewport is not.
+  rings(ctx, 1318, 250, 160, 1);
+
+  // faint echo out of the avatar's corner, so the profile picture reads
+  // as the origin of the geometry rather than a separate sticker
+  rings(ctx, 150, 470, 300, 0.055);
+
+  // ── type column ──────────────────────────────────────────────────
+  // Everything sits x>=330 (avatar overlay) and y 120..400 (mobile crop).
+  const X = 330;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+
+  ctx.font = '700 21px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '5px';
+  ctx.fillStyle = AMBER; ctx.fillText('COFFER.FUN', X, 152);
+  const wDomain = ctx.measureText('COFFER.FUN').width;
+  ctx.font = '500 21px "IBM Plex Mono", monospace';
+  ctx.fillStyle = MUTED; ctx.fillText('· TRADER VAULTS ON SOLANA', X + wDomain + 18, 152);
+  ctx.letterSpacing = '0px';
+
+  ctx.font = '700 58px "Space Mono", monospace';
+  ctx.fillStyle = TEXT;  ctx.fillText('BACK THE BEST TRADERS.', X, 243);
+  ctx.fillStyle = AMBER; ctx.fillText('THEY CAN NEVER RUN.',   X, 311);
+
+  // proof chips — claims that survive scrutiny
+  ctx.font = '500 17px "IBM Plex Mono", monospace';
+  const chips = [['70%',' to depositors'],['Traders'," can't withdraw"],['Every record',' on-chain']];
+  let cx = X;
+  for (const [bold, rest] of chips){
+    const wB = ctx.measureText(bold).width;
+    ctx.font = '500 17px "IBM Plex Mono", monospace';
+    const wR = ctx.measureText(rest).width;
+    const w = wB + wR + 32;
+    ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+    ctx.strokeRect(cx+0.5, 348.5, w, 40);
+    ctx.fillStyle = TEXT;  ctx.fillText(bold, cx+16, 373);
+    ctx.fillStyle = MUTED; ctx.fillText(rest, cx+16+wB, 373);
+    cx += w + 13;
+  }
+}
+
+(async()=>{
+  for(const f of ['700 58px "Space Mono"','700 21px "IBM Plex Mono"','500 17px "IBM Plex Mono"']) await document.fonts.load(f);
+  await document.fonts.ready;
+  draw();
+  window.__assets = { banner: document.getElementById('banner').toDataURL('image/png') };
+  window.__metrics = (()=>{
+    const ctx = document.getElementById('banner').getContext('2d');
+    ctx.font = '700 58px "Space Mono", monospace';
+    const h1 = 330 + ctx.measureText('BACK THE BEST TRADERS.').width;
+    const h2 = 330 + ctx.measureText('THEY CAN NEVER RUN.').width;
+    ctx.font = '500 17px "IBM Plex Mono", monospace';
+    let cx = 330;
+    for (const [b,r] of [['70%',' to depositors'],['Traders'," can't withdraw"],['Every record',' on-chain']]){
+      cx += ctx.measureText(b).width + ctx.measureText(r).width + 32 + 13;
+    }
+    return { headline1End: Math.round(h1), headline2End: Math.round(h2),
+             chipsEnd: Math.round(cx-13), ringLeftEdge: 1318-160 };
+  })();
+  window.__ready = true;
+})();
+</script></body></html>

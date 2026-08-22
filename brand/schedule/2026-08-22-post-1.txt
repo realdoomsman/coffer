@@ -1,0 +1,15 @@
+[IMAGE: NONE]
+TRADER VAULTS ON SOLANA
+
+Back the best traders. They can never run.
+
+Traders pool your capital, trade it, and take 30% of profits.
+But they can never withdraw from the vault.
+
+Custody lives in a program-owned PDA. No code path moves funds to non-vault accounts.
+
+70% to depositors. 30% to traders. On-chain record.
+
+#Solana #DeFi #Vaults #CopyTrade
+
+coffer.fun

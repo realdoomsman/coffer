@@ -1,0 +1,20 @@
+[IMAGE: NONE]
+Why traders can't rug a Coffer vault.
+
+Other copy-trade platforms: trader controls the wallet → they can rug.
+
+Coffer: the vault program owns custody. Traders get scoped execute_swap instructions ONLY.
+
+The execute_swap instruction is scoped:
+- Can only call approved Jupiter routes
+- Can only move tokens within the vault
+- Cannot send funds to external addresses
+
+The trader's private key never signs a transfer. Only the program does.
+
+Check the devnet program yourself:
+https://explorer.solana.com/address/8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U?cluster=devnet
+
+Trust code, not promises.
+
+#Solana #DeFi #Security #Web3

@@ -49,3 +49,27 @@ send('coffer-banner.png', __assets.banner);
 Edit the drawing code in `gen.html` to change either asset. Do NOT screenshot
 the browser for these — the pane scales screenshots and you get a blurry
 800px-wide image instead of the exact size X wants.
+
+## Banner
+
+`banner.html` draws `coffer-banner.png` (1500x500) on a canvas at exact pixel
+size — screenshotting the browser pane scales to ~800px and produces a blurry
+banner, so don't.
+
+To regenerate: serve this folder standalone (Vite's SPA fallback swallows the
+path), run `node recv.mjs`, open the page, and POST `window.__assets.banner`
+to the receiver. `window.__metrics` reports the rightmost ink of each text row
+against the ring's left edge — keep `clearance` positive or the headline
+collides with the mark.
+
+Layout constraints, both learned the hard way:
+- X overlays the avatar **bottom-left** and crops top/bottom on narrow
+  screens, so all type sits x >= 330 and y 120..400.
+- The ring mark is sized to fit **whole** inside that same crop band. A
+  dramatic edge-bleed slices the rings differently on every viewport; reading
+  as the same object as the avatar matters more than the drama.
+
+The `BANDS` array is the concentric structure read off the profile picture,
+as fractions of the radius. The banner reuses it verbatim so the two marks are
+the same object at different sizes. Palette is sampled to match:
+ink `#000000`, grey `#3c3c3c`, amber `#f9a81b`, gold `#a87d22`.
