@@ -89,6 +89,28 @@ export const env = {
   get mainnetRpcUrl(): string {
     return str("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com");
   },
+  /**
+   * Mainnet RPC pool, tried in order. A keyed endpoint (Helius et al) set
+   * via MAINNET_RPC_URL always leads. Behind it sit free public endpoints
+   * so wallet scans and token-holder reads degrade to "slower" instead of
+   * "rate-limited to death" when no key is configured — the public
+   * mainnet-beta endpoint alone hard-429s after ~10 calls in a burst.
+   * Set MAINNET_RPC_URLS (comma-separated) to override the whole pool.
+   */
+  get mainnetRpcPool(): string[] {
+    const explicit = str("MAINNET_RPC_URLS", "")
+      .split(",")
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (explicit.length > 0) return explicit;
+    const primary = str("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com");
+    const fallbacks = [
+      "https://api.mainnet-beta.solana.com",
+      "https://solana-rpc.publicnode.com",
+      "https://rpc.ankr.com/solana",
+    ];
+    return [primary, ...fallbacks.filter((u) => u !== primary)];
+  },
   get nodeEnv(): string {
     return str("NODE_ENV", "development");
   },

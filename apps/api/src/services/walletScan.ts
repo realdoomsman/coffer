@@ -55,8 +55,15 @@ export class RpcHttpError extends Error {
   }
 }
 
-async function rpc<T>(method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(env.mainnetRpcUrl, {
+/**
+ * Round-robin cursor over the RPC pool. Kept module-level so consecutive
+ * calls spread across endpoints instead of hammering the first one — the
+ * public mainnet endpoint 429s after roughly ten calls in a burst.
+ */
+let rpcCursor = 0;
+
+async function rpcOnce<T>(url: string, method: string, params: unknown[]): Promise<T> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: ++rpcId, method, params }),
@@ -73,6 +80,33 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   const body = (await res.json()) as { result?: T; error?: { code?: number; message?: string } };
   if (body.error) throw new Error(`RPC error ${body.error.code}: ${body.error.message}`);
   return body.result as T;
+}
+
+/**
+ * Pooled RPC: try each endpoint once, rotating the starting point so load
+ * spreads. Only transport/rate-limit failures fall through — a valid RPC
+ * error (bad params, unknown method) is the same on every endpoint and is
+ * rethrown immediately. The last failure propagates so callers keep their
+ * existing RpcHttpError backoff behaviour.
+ */
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+  const pool = env.mainnetRpcPool;
+  const start = rpcCursor++ % pool.length;
+  let lastErr: unknown;
+  for (let i = 0; i < pool.length; i++) {
+    const url = pool[(start + i) % pool.length]!;
+    try {
+      return await rpcOnce<T>(url, method, params);
+    } catch (err) {
+      lastErr = err;
+      // a genuine JSON-RPC error is deterministic — don't waste the pool
+      if (!(err instanceof RpcHttpError) && !(err instanceof TypeError) &&
+          !(err instanceof DOMException)) {
+        throw err;
+      }
+    }
+  }
+  throw lastErr;
 }
 
 export interface SigInfo {
