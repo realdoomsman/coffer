@@ -22,7 +22,7 @@ const SOL_PRICE_TTL_MS = 15_000;
 interface TierPrice {
   priceUsd: number;
   change24hPct?: number;
-  source: "jupiter" | "birdeye";
+  source: "jupiter" | "birdeye" | "pumpfun";
 }
 
 interface DexScreenerMeta {
@@ -181,10 +181,85 @@ async function dexScreenerLookup(mint: string): Promise<DexScreenerMeta | undefi
   }
 }
 
+
+// ── pump.fun metadata (pre-graduation tier) ────────────────────────
+// DexScreener and Jupiter only know a token once it has an indexed pool,
+// so a coin minted seconds ago renders as "<4-char mint> / Unknown token"
+// with no market cap — exactly the tokens Pulse exists to surface. The
+// launchpad itself knows them from block zero, and this platform is
+// pump.fun-only, so ask the source.
+
+const PUMP_COIN_BASE = "https://frontend-api-v3.pump.fun/coins";
+
+interface PumpCoin {
+  name?: string;
+  symbol?: string;
+  image_uri?: string;
+  usd_market_cap?: number;
+  complete?: boolean;
+}
+
+async function pumpFunLookup(mint: string): Promise<DexScreenerMeta | undefined> {
+  try {
+    const res = await fetch(`${PUMP_COIN_BASE}/${encodeURIComponent(mint)}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return undefined;
+    const c = (await res.json()) as PumpCoin;
+    const symbol = c.symbol?.trim();
+    const name = c.name?.trim();
+    if (!symbol && !name) return undefined;
+    const mcap = Number(c.usd_market_cap);
+    return {
+      ...(symbol ? { symbol } : {}),
+      ...(name ? { name } : {}),
+      ...(c.image_uri ? { imageUrl: c.image_uri } : {}),
+      ...(Number.isFinite(mcap) && mcap > 0 && mcap <= MCAP_SANITY_MAX_USD
+        ? { mcapUsd: mcap }
+        : {}),
+      dex: c.complete ? "pumpswap" : "pump.fun",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+
+// ── tier 3.5: pump.fun last trade (pre-graduation price) ───────────
+// Jupiter/Birdeye/DexScreener only price pool-indexed tokens, so a coin
+// on its bonding curve has no mark and every trade against it is refused
+// (422) — including Pulse's quick-buy, which exists to trade exactly
+// these. pump.fun's own candle close IS the authoritative last trade and
+// is the same series the chart renders, so the mark and the chart agree.
+// This is a real observed price, not a derivation.
+
+async function pumpFunPrice(mint: string): Promise<number | undefined> {
+  try {
+    const res = await fetch(
+      `https://swap-api.pump.fun/v1/coins/${encodeURIComponent(mint)}/candles?interval=1m&limit=1&currency=USD`,
+      { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
+    );
+    if (!res.ok) return undefined;
+    const rows = (await res.json()) as { close?: string | number }[];
+    const close = Number(rows?.[rows.length - 1]?.close);
+    return Number.isFinite(close) && close > 0 ? close : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Metadata (symbol/name/image/pair) — slow-moving, cached 300s. */
 async function tokenMeta(mint: string): Promise<DexScreenerMeta> {
   return getOrSet(`meta:${mint}`, META_TTL_MS, async () => {
-    return (await dexScreenerLookup(mint)) ?? {};
+    const dex = await dexScreenerLookup(mint);
+    // A pool-indexed token is fully described by DexScreener. Anything
+    // missing an identity is either brand new or unindexed — ask the
+    // launchpad, and let each source fill the other's gaps.
+    if (dex?.symbol && dex.name && dex.mcapUsd !== undefined) return dex;
+    const pump = await pumpFunLookup(mint);
+    if (!pump) return dex ?? {};
+    return { ...pump, ...Object.fromEntries(Object.entries(dex ?? {}).filter(([, v]) => v !== undefined)) };
   });
 }
 
@@ -257,6 +332,13 @@ async function resolveOne(
   let price: TierPrice | undefined = jupiter.get(mint); // tier 1
   if (!price) price = await birdeyePrice(mint); // tier 2
   const meta = await tokenMeta(mint); // tier 3 doubles as metadata
+
+  // tier 3.5 — bonding-curve tokens have no pool and therefore no mark
+  // from any aggregator; the launchpad's own last trade is authoritative
+  if (!price && meta.priceUsd === undefined) {
+    const pumpUsd = await pumpFunPrice(mint);
+    if (pumpUsd !== undefined) price = { priceUsd: pumpUsd, source: "pumpfun" };
+  }
 
   const info = compose(mint, price, meta, solUsd);
   return cacheSet(`token:${mint}`, info, TOKEN_TTL_MS);

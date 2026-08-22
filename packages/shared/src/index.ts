@@ -307,7 +307,7 @@ export interface TokenInfo {
   pairAddress?: string;
   risk?: TokenRisk;
   /** which oracle tier produced this mark */
-  source: "jupiter" | "birdeye" | "dexscreener" | "stale" | "none";
+  source: "jupiter" | "birdeye" | "pumpfun" | "dexscreener" | "stale" | "none";
   fetchedAt: number;
 }
 
