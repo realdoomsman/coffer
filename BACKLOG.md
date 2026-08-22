@@ -5,27 +5,30 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 🔶 = partial/demo-grade, ⬜ = not started.
 
 ## The core (nothing else matters if this isn't real)
-
-- 🔶 **On-chain vault program** — full Anchor source written + adversarially reviewed
-  (REVIEW-FINDINGS.md), but NOT compiled or deployed. Needs: WSL/CI toolchain build,
-  fix H1 (permissionless stale-NAV withdrawal) + H2 (forced unwind), devnet deploy,
-  `anchor keys sync`, integration tests, then the audit.
-- 🔶 **Real execution** — trades currently settle against the demo ledger at live oracle
-  prices. Needs: server builds Jupiter Router `/swap/v2/build` route → wraps in
-  `execute_swap` → lands via Sender/Jito. The UI ticket is already shaped for it.
-- 🔶 **Real deposits/withdrawals** — demo ledger today. Needs Privy signing (client SDK is
-  wired, needs a real `VITE_PRIVY_APP_ID`) against the deployed program.
-- ⬜ **NAV keeper service** — posts bounded NAV on-chain per the program's rules.
-- ⬜ **Mirror engine** — the copytrader port: gRPC detection, local decoders, sizing,
-  landing, reconciliation, public copy-lag metric. Biggest remaining service.
+- ✅ **On-chain vault program** — written, adversarially reviewed, H1/H2 liveness blockers
+  fixed, compiled natively (MSVC, not WSL), **deployed to devnet**
+  `8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U`, and **proven executing**: init_platform
+  ran on-chain and its state decodes exactly as the source describes. Still needs a
+  professional audit before mainnet.
+- ⬜ **Real deposits/withdrawals** — THE next milestone. Privy is live and the program is
+  live; what's missing is the client half: build init_vault / init_depositor / deposit
+  instructions (no IDL — see scripts/onchain-smoke.mjs for the hand-rolled pattern) and
+  sign them as the user via Privy session signers.
+- ⬜ **Real execution (trading)** — server builds a Jupiter Router `/swap/v2/build` route,
+  wraps it in `execute_swap`, lands it. The UI ticket and the program instruction both
+  already exist; nothing connects them yet.
+- ⬜ **NAV keeper service** — posts bounded NAV on-chain per the program's rules. Until it
+  runs, share price on real vaults can't move and withdrawals fall to the emergency path.
+- ✅ **Mirror engine (paper)** — copies a real mainnet leader's trades: balance-diff
+  detection, attach-forward, proportional sells, published copy-lag. Runs live.
 
 ## Terminal parity (vs Axiom/Photon/GMGN token pages)
 
 - ✅ Live candles (GeckoTerminal pools), live price, timeframe strip, buys/sells pressure,
   pool tape, presets P1-P3, gas receipt, pinned positions, sell-initials, subscript prices
 - ✅ Token security: mint/freeze authority + largest accounts from mainnet RPC
-- ⬜ Market-cap-denominated chart toggle (Price/MCap) — memecoin traders think in mcap
-- ⬜ Chart trade markers (your fills as B/S bubbles, tracked-wallet markers)
+- ✅ Market-cap-denominated chart toggle (Price/MCap), driven by real on-chain supply
+- ✅ Chart trade markers (your fills as B/S bubbles; same-second fills merge)
 - ⬜ Draggable limit-order lines on the chart
 - ⬜ Top traders / holders tabs with wallet-type badges (sniper/insider/bundler/dev)
 - ⬜ Bubble map holder-cluster view; bundle analysis (trench.bot-style two-number honesty:
