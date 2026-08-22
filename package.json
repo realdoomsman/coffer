@@ -14,7 +14,7 @@
     "db:setup": "npm run db:push -w apps/api && npm run db:seed -w apps/api",
     "build": "npm run build -w packages/shared --if-present && node scripts/prisma-prod.mjs generate && npm run build -w apps/api --if-present && npm run build -w apps/web",
     "build:prod": "npm install && npm run build -w packages/shared && node scripts/prisma-prod.mjs generate && npm run build -w apps/api",
-    "start": "cd apps/api && tsx src/index.ts",
+    "start": "node app.js",
     "start:prod": "cd apps/api && node dist/index.js",
     "prisma:prod:emit": "node scripts/prisma-prod.mjs emit",
     "prisma:prod:validate": "node scripts/prisma-prod.mjs validate",
