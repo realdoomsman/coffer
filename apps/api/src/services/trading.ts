@@ -27,14 +27,21 @@ export class TradeError extends Error {
 }
 
 // ── THE WALL ────────────────────────────────────────────────────────
-// Real vaults hold real SOL and only ever execute on-chain. Until the
-// program is deployed (WSL), Privy wallets exist and the keeper is
-// funded, EVERY ledger operation against a real vault is rejected with
-// this exact shape — real vaults never touch the simulated engine.
+// Real vaults hold real SOL and only ever execute on-chain. The vault
+// program is now DEPLOYED (devnet, 2026-08-22), so what remains is the
+// client half: signing transactions as the user (Privy session signers)
+// and a funded NAV keeper. Until both exist, EVERY ledger operation
+// against a real vault is rejected with this exact shape — real vaults
+// never touch the simulated engine, deployed program or not.
 export const REAL_VAULT_WALL = {
   error:
-    "real vaults execute on-chain only — pending: program deploy (WSL), Privy wallets, funded keeper",
-  pending: ["program_deploy", "privy_wallets"],
+    "real vaults execute on-chain only — the vault program is live on devnet " +
+    "(8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U); pending: client-side " +
+    "transaction signing (Privy session signers) and a funded NAV keeper",
+  /** what is actually left — program_deploy cleared 2026-08-22 */
+  pending: ["client_signing", "nav_keeper"],
+  programId: "8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U",
+  cluster: "devnet",
 } as const;
 
 export function realVaultWallError(): TradeError {

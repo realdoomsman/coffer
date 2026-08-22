@@ -60,8 +60,8 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
         </div>
         <div className="callout">
           This vault only ever moves real SOL on-chain — nothing here is simulated, so deposits
-          stay closed until launch. Unlocks in order: <strong>program deploy</strong> (devnet,
-          needs WSL) → <strong>Privy wallets</strong> → <strong>funding opens</strong>. The vault
+          stay closed until launch. <strong>The vault program is live on devnet</strong> — what
+          remains is signing as you (Privy) and a funded NAV keeper, then funding opens. The vault
           page, thesis, and terms are live now so depositors can find it early.
         </div>
       </div>
