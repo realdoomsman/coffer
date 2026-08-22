@@ -32,6 +32,7 @@ import { walletsRouter } from "./routes/wallets.js";
 import { withdrawalsRouter } from "./routes/withdrawals.js";
 import { leaderboardsRouter } from "./routes/leaderboards.js";
 import { xOAuthRouter } from "./routes/xOAuth.js";
+import { monitoringRouter } from "./routes/monitoring.js";
 import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
 import { startNavKeeper, stopNavKeeper } from "./services/navKeeper.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
@@ -42,6 +43,7 @@ app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 
 app.use("/api/health", healthRouter);
+app.use("/api/monitoring", monitoringRouter);
 app.use("/api/vaults", vaultsRouter);
 app.use("/api/tokens", tokensRouter);
 app.use("/api/tokenstats", tokenStatsRouter);
