@@ -302,11 +302,24 @@ export const api = {
       | { side: "buy"; mint: string; solAmount: number }
       | { side: "sell"; mint: string; sellFraction: number },
   ) => post<TradeResult>(`/vaults/${vaultId}/trade`, body),
-  ohlcv: async (mint: string, tf: ChartTimeframe) => {
-    const r = await get<{ candles: Candle[]; pool: string | null; source?: "pumpfun" | "geckoterminal"; stale?: boolean; fetchedAt?: number }>(
-      `/ohlcv/${mint}?tf=${tf}`,
-    );
-    return r;
+  /**
+   * Candles. Pass `since` (the newest bar time already held) to get only the
+   * tail — a full 1s window is ~85KB and polling it every 1.2s is hundreds
+   * of megabytes an hour at one viewer. The response echoes `partial` so the
+   * caller knows to merge, and `gap` when the window no longer reaches back
+   * to `since` and a full refetch is required.
+   */
+  ohlcv: async (mint: string, tf: ChartTimeframe, since?: number) => {
+    const q = since && since > 0 ? `&since=${Math.floor(since)}` : "";
+    return get<{
+      candles: Candle[];
+      pool: string | null;
+      source?: "pumpfun" | "geckoterminal";
+      stale?: boolean;
+      fetchedAt?: number;
+      partial?: boolean;
+      gap?: boolean;
+    }>(`/ohlcv/${mint}?tf=${tf}${q}`);
   },
   searchTokens: async (q: string) => {
     const r = await get<{ results: TokenSearchResult[] }>(

@@ -167,10 +167,10 @@ const num = (v: unknown): number => {
  * bonding-curve and graduated tokens alike. Returns [] on any failure so
  * the caller can fall through — never throws.
  */
-async function pumpCandles(mint: string, tf: Timeframe): Promise<Candle[]> {
+async function pumpCandles(mint: string, tf: Timeframe, limit: number): Promise<Candle[]> {
   try {
     const res = await fetch(
-      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=${PUMP_LIMIT[tf]}&currency=USD`,
+      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=${limit}&currency=USD`,
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
     );
     if (!res.ok) return [];
@@ -199,20 +199,119 @@ async function pumpCandles(mint: string, tf: Timeframe): Promise<Candle[]> {
 
 // ── candles ────────────────────────────────────────────────────────
 
-const OHLCV_FAIL_TTL_MS = 10_000; // retry sooner after a failure
+/** Bar width in ms, used to scale failure and fallback TTLs. */
+const TF_MS: Record<Timeframe, number> = {
+  "1s": 1_000,
+  "15s": 15_000,
+  "30s": 30_000,
+  "1m": 60_000,
+  "5m": 300_000,
+  "15m": 900_000,
+  "1h": 3_600_000,
+};
 
-export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult> {
+/**
+ * GeckoTerminal has no granularity below a minute, so a GT answer to a 1s
+ * request is a 1-minute chart. Caching that at the 1s TTL would re-ask GT
+ * every single second for data that cannot change more than once a minute —
+ * 120 calls/min against gtBudget's 25/min capacity, at "high" priority,
+ * starving pool resolution and the entire Pulse board for every other user
+ * on the server. The cache TTL must follow whoever actually answered.
+ */
+const GT_MIN_TTL_MS = 30_000;
+
+/** Retry a hard failure after two bar widths, never slower than 10s. */
+function failTtl(tf: Timeframe): number {
+  return Math.min(10_000, Math.max(2_000, TF_MS[tf] * 2));
+}
+
+/**
+ * How many bars to ask for on a REFRESH, once we already hold a window.
+ *
+ * A full 1s window is 600 rows / ~131KB. Re-pulling that every 1.2s is
+ * ~385MB per hour per viewer, each way, for maybe a dozen new bars. Because
+ * sub-minute bars are sparse, a 40-row tail still covers roughly fifteen
+ * minutes of wall clock — enough that the server can miss polls for minutes
+ * and still stitch the window back together without a hole.
+ */
+const PUMP_TAIL: Record<Timeframe, number> = {
+  "1s": 40,
+  "15s": 40,
+  "30s": 40,
+  "1m": 40,
+  "5m": 40,
+  "15m": 40,
+  "1h": 40,
+};
+
+/** Bars retained per key, trimmed oldest-first. */
+const retained = new Map<string, Candle[]>();
+
+/**
+ * Merge a fetched tail into the retained window.
+ *
+ * Upstream re-sends the currently-forming bar on every poll with updated
+ * OHLC, so a merge must overwrite by timestamp rather than append —
+ * otherwise the same second appears twice and the strictly-ascending
+ * contract the chart depends on is broken.
+ */
+function mergeWindow(key: string, tail: Candle[], cap: number): Candle[] {
+  const prev = retained.get(key) ?? [];
+  if (tail.length === 0) return prev;
+
+  const oldestTail = tail[0]!.t;
+  const newestPrev = prev.length > 0 ? prev[prev.length - 1]!.t : -Infinity;
+  // The tail starts after everything we hold — there is a hole between them.
+  // Drop the stale window rather than splice a gap the chart would render
+  // as contiguous.
+  if (prev.length > 0 && oldestTail > newestPrev + 1) {
+    const trimmed = tail.slice(-cap);
+    retained.set(key, trimmed);
+    return trimmed;
+  }
+
+  const byTs = new Map<number, Candle>();
+  for (const c of prev) byTs.set(c.t, c);
+  for (const c of tail) byTs.set(c.t, c); // fetched wins — it is newer
+  const merged = [...byTs.values()].sort((a, b) => a.t - b.t).slice(-cap);
+  retained.set(key, merged);
+  return merged;
+}
+
+/**
+ * In-flight loads, so concurrent viewers of the same token share one
+ * upstream call. Without this, a 1s TTL against a ~300-680ms upstream RTT
+ * means a large share of requests land inside an open fetch window and each
+ * starts its own — and pump.fun's edge punishes concurrency hardest of all.
+ */
+const inFlight = new Map<string, Promise<OhlcvResult>>();
+
+export function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult> {
   const key = `ohlcv:${mint}:${tf}`;
   const cached = cacheGet<OhlcvResult>(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const hit = inFlight.get(key);
+  if (hit) return hit;
+
+  const p = loadOhlcv(mint, tf, key).finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+async function loadOhlcv(mint: string, tf: Timeframe, key: string): Promise<OhlcvResult> {
 
   const good = recallGood<OhlcvResult>(key);
 
   // 1) pump.fun native — needs no pool, so bonding-curve tokens chart too
-  const pump = await pumpCandles(mint, tf);
+  // Cold key pulls the full window; a warm one pulls only a tail and merges.
+  const warm = (retained.get(key)?.length ?? 0) > 0;
+  const want = warm ? PUMP_TAIL[tf] : PUMP_LIMIT[tf];
+  const pump = await pumpCandles(mint, tf, want);
   if (pump.length > 0) {
+    const merged = mergeWindow(key, pump, PUMP_LIMIT[tf]);
     const fresh: OhlcvResult = {
-      candles: pump,
+      candles: merged,
       pool: good?.value.pool ?? null,
       fetchedAt: Date.now(),
       source: "pumpfun",
@@ -222,6 +321,22 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
   }
 
   // 2) GeckoTerminal fallback — pool-based, graduated tokens only.
+  //
+  // Sub-minute requests only reach GT on a genuinely cold key. Serving a
+  // 1-minute chart once, labelled, while a new token has no pump.fun
+  // candles yet is a reasonable courtesy; doing it once per second is a
+  // denial of service against our own GT budget. With a remembered chart
+  // in hand we serve that instead (step 3) and let the next poll retry
+  // pump.fun.
+  const subMinute = TF_MS[tf] < 60_000;
+  if (subMinute && good) {
+    return cacheSet(
+      key,
+      { ...good.value, stale: true, fetchedAt: good.at },
+      failTtl(tf),
+    );
+  }
+
   // Pool pinning: once a pool has produced candles, prefer it over a
   // fresh resolution so re-resolution churn can't blank a live chart.
   const pool = (await topPool(mint)) ?? good?.value.pool ?? null;
@@ -253,7 +368,8 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
           source: "geckoterminal",
         };
         rememberGood(key, fresh);
-        return cacheSet(key, fresh, ttlFor(tf));
+        // GT answered — cache on GT's clock, not the requested timeframe's
+        return cacheSet(key, fresh, Math.max(GT_MIN_TTL_MS, ttlFor(tf)));
       }
     } catch {
       // fall through to stale
@@ -263,7 +379,7 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
   // 3) both upstreams failed or were empty — serve the last good chart,
   // marked stale, and cache only briefly so the next poll retries
   if (good) {
-    return cacheSet(key, { ...good.value, stale: true, fetchedAt: good.at }, OHLCV_FAIL_TTL_MS);
+    return cacheSet(key, { ...good.value, stale: true, fetchedAt: good.at }, failTtl(tf));
   }
-  return cacheSet(key, { candles: [], pool }, OHLCV_FAIL_TTL_MS);
+  return cacheSet(key, { candles: [], pool }, failTtl(tf));
 }

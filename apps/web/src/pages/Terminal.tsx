@@ -284,18 +284,46 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     rawCandles.current = [];
     setCandleVer((v) => v + 1);
     setCandleState("loading");
-    const load = () =>
-      api
-        .ohlcv(mint, tf)
+    const load = (force = false) => {
+      // A backgrounded terminal on 1s would poll ~50x/min forever. Every
+      // other poller in the app pauses when hidden; this one was a bare
+      // setInterval and did not.
+      if (document.hidden && !force) return;
+
+      const held = rawCandles.current;
+      // ask only for what we don't have — a full 1s window is ~85KB, the
+      // delta is a couple hundred bytes
+      const since = held.length > 0 ? held[held.length - 1]!.t : undefined;
+      return api
+        .ohlcv(mint, tf, since)
         .then((r) => {
           if (!alive) return;
           setPool(r.pool);
           setSource(r.source ?? null);
+
+          if (r.partial && r.gap) {
+            // the server's window no longer reaches back to what we hold —
+            // merging would splice an invisible hole into the series
+            rawCandles.current = [];
+            return;
+          }
+
           if (r.candles.length > 0) {
-            rawCandles.current = r.candles;
+            if (r.partial && held.length > 0) {
+              // merge by timestamp: the newest held bar is usually still
+              // forming and comes back with updated OHLC under the same t
+              const byTs = new Map(held.map((c) => [c.t, c]));
+              for (const c of r.candles) byTs.set(c.t, c);
+              rawCandles.current = [...byTs.values()].sort((a, b) => a.t - b.t);
+            } else {
+              rawCandles.current = r.candles;
+            }
             setCandleVer((v) => v + 1);
             setCandleState(r.stale ? "stale" : "live");
-          } else if (rawCandles.current.length > 0) {
+          } else if (r.partial && held.length > 0) {
+            // nothing new since our newest bar — normal at 1s, not an error
+            setCandleState(r.stale ? "stale" : "live");
+          } else if (held.length > 0) {
             // failed refresh — keep what the user is looking at
             setCandleState("stale");
           } else {
@@ -306,11 +334,17 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
           if (!alive) return;
           setCandleState(rawCandles.current.length > 0 ? "stale" : "none");
         });
-    load();
-    const iv = setInterval(load, CANDLE_POLL_MS[tf]);
+    };
+    load(true);
+    const iv = setInterval(() => load(), CANDLE_POLL_MS[tf]);
+    const onVis = () => {
+      if (!document.hidden) void load(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       alive = false;
       clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [mint, tf]);
 
