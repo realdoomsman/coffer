@@ -68,6 +68,34 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 - ⬜ Postgres migration + deploy story (Render/Vercel like PaperApe)
 - ⬜ Legal: entity, ToS, geo-fencing before real depositors
 
+## Competitor teardown (2026-08-22: Axiom, GMGN, Padre, Bloom)
+
+Shipped from it:
+- ✅ **Layered chart overlays** (Axiom "Display Options") — my fills / tracked
+  wallets / whale prints toggleable, plus a dashed average-entry line labelled
+  with live PnL. All layers merge into one strictly-ordered marker series.
+- ✅ **Tabbed trade feed** (All / Tracked / You) beside the chart
+- ✅ **Token facts panel** — liquidity, mcap, supply, period high, 24h buy/sell
+  split, mint + freeze authority, top-10 concentration
+- ✅ **On-chain checks popover** on discovery cards, loaded on inspect
+- ✅ **Daily realized-pnl calendar** (Bloom) on the vault page
+
+Wanted but blocked on an indexer we don't have. All four run private
+indexers; we have Helius RPC + pump.fun + GeckoTerminal, which is fine for
+ONE token on demand and far too expensive for 70+ cards every 10s:
+- ⬜ Per-card sparkline — needs a candle series per card per refresh
+- ⬜ Holders count / "pro traders" count per card
+- ⬜ **Sniper / insider / bundler classification** — the real moat. Needs
+  tx-level bundle analysis and wallet funding graphs, not just balances.
+- ⬜ Dev history ("Dev Tokens (3689)") + dev wallet age/balance hovercard
+- ⬜ Reused-token-image detection (Axiom flags duplicate artwork — cheap and
+  genuinely good; needs an image hash index)
+- ⬜ DexScreener-paid badge per card
+- ⬜ X/Twitter mention feed wired into discovery (GMGN's X Tracker)
+- ⬜ Strategy automation taxonomy (Bloom: Spot / Copy Trade / AFK / Twitter) —
+  we have Copy Trade as mirror vaults; AFK and Twitter triggers are open
+- ⬜ Multi-leg TP/SL at entry; draggable limit lines on the chart
+
 ## Known bugs / debt
 
 - GT free-tier budgeter smooths 429s but a paid key (or Birdeye) is the real fix
