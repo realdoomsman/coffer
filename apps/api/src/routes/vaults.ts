@@ -8,7 +8,8 @@ import {
 } from "@coffer/shared";
 import { Router } from "express";
 import { prisma } from "../db.js";
-import { crystallize } from "../services/fees.js";
+import { env } from "../env.js";
+import { crystallize, unlockAt } from "../services/fees.js";
 import {
   depositOnChain,
   initVaultOnChain,
@@ -467,7 +468,7 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
     const now = nowSec();
 
     if (instant) {
-      // crystallize the 70/20/10 split against this portion's cost basis
+      // crystallize the 70/30 split against this portion's cost basis
       const fees = crystallize({
         grossSol: valueSol,
         positionCostSol: depositor.costSol,
@@ -475,6 +476,7 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
         positionShares: depositor.shares,
         perfFeeBps: dbVault.perfFeeBps,
       });
+      const unlocksAt = unlockAt(now);
       const request = await prisma.$transaction(async (tx) => {
         // CONDITIONAL, atomic debits. The held/buffer checks above are a
         // fast path only — concurrent withdrawals all read the same stale
@@ -500,16 +502,33 @@ vaultsRouter.post("/:id/withdraw", async (req, res, next) => {
           },
           data: {
             // gross leaves depositor equity; fees move from the buffer
-            // into the accrual buckets (owed, outside tvl)
+            // into the accrual buckets (owed, outside tvl). Only the
+            // IMMEDIATE leg is credited as spendable trader fees — the
+            // vested leg is tracked separately and locked (below).
             tvlSol: { decrement: valueSol },
             totalShares: { decrement: shares },
             solBufferSol: { decrement: valueSol },
             traderFeesAccruedSol: { increment: fees.traderFeeSol },
-            platformFeesAccruedSol: { increment: fees.platformFeeSol },
+            vestedFeesAccruedSol: { increment: fees.traderVestedSol },
           },
         });
         if (paid.count === 0) {
           throw new TradeError(409, "vault buffer insufficient — try a windowed withdrawal");
+        }
+        // The escrowed third: one tranche per crystallization, locked
+        // 60 days from this moment. Zero-profit exits create nothing.
+        if (fees.traderVestedSol > 0) {
+          await tx.vestedFee.create({
+            data: {
+              vaultId: dbVault.id,
+              traderId: dbVault.traderId,
+              amountSol: fees.traderVestedSol,
+              crystallizedAt: now,
+              unlocksAt,
+              status: "locked",
+              escrowWallet: env.feeEscrowWallet ?? null,
+            },
+          });
         }
         // a fair-priced withdrawal leaves per-share value unchanged
         await tx.equityPoint.upsert({

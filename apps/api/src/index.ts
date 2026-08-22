@@ -25,6 +25,7 @@ import { tokensRouter } from "./routes/tokens.js";
 import { tokenStatsRouter } from "./routes/tokenstats.js";
 import { tradersRouter } from "./routes/traders.js";
 import { vaultsRouter } from "./routes/vaults.js";
+import { vestedRouter } from "./routes/vested.js";
 import { walletsRouter } from "./routes/wallets.js";
 import { withdrawalsRouter } from "./routes/withdrawals.js";
 import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
@@ -50,6 +51,7 @@ app.use("/api/wallets", walletsRouter);
 app.use("/api/activity", activityRouter);
 app.use("/api/pooltrades", poolTradesRouter);
 app.use("/api/withdrawals", withdrawalsRouter);
+app.use("/api/vested", vestedRouter);
 app.use("/api/meta", metaRouter);
 app.use("/api/onchain", onchainRouter);
 
@@ -159,6 +161,8 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/activity?limit=30&mode="],
   ["GET ", "/api/pooltrades/:mint"],
   ["POST", "/api/withdrawals/:id/execute"],
+  ["GET ", "/api/vested?traderId=me"],
+  ["POST", "/api/vested/:id/claim"],
   ["GET ", "/api/meta"],
   ["GET ", "/api/onchain/config · /api/onchain/me · /api/onchain/deposits"],
   ["POST", "/api/onchain/deposit/prepare  (unsigned tx for the USER to sign)"],

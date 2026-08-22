@@ -831,3 +831,67 @@ export function vaultDepositorToJson(
     ...(lamports === undefined ? {} : { accountLamports: String(lamports) }),
   };
 }
+
+// ── program EVENTS (appended) ──────────────────────────────────────
+// Anchor emits events as a base64 blob on a `Program data: <b64>` log
+// line, prefixed with sha256("event:<Struct>")[0..8]. Reading the event
+// is the only way to learn how many shares a deposit minted from the
+// transaction ALONE — before/after account diffing needs a snapshot
+// taken at the right slot, which a confirmation arriving later cannot
+// reconstruct. Used by the deposit-confirm route to record the exact
+// mint against a signature it has already verified on chain.
+
+/** Anchor event discriminator: sha256("event:<Struct>")[0..8]. */
+export function eventDiscriminator(structName: string): Buffer {
+  return sha256(`event:${structName}`).subarray(0, 8);
+}
+
+export interface DepositedEvent {
+  vault: PublicKey;
+  depositor: PublicKey;
+  amountLamports: bigint;
+  sharesMinted: bigint;
+  totalShares: bigint;
+  navLamports: bigint;
+}
+
+/** Decode a `Deposited` event body (state.rs field order). */
+export function decodeDepositedEvent(data: Buffer): DepositedEvent {
+  const want = eventDiscriminator("Deposited");
+  if (!data.subarray(0, 8).equals(want)) throw new Error("not a Deposited event");
+  const r = new BorshReader(data);
+  r.skip(8);
+  return {
+    vault: r.pubkey(),
+    depositor: r.pubkey(),
+    amountLamports: r.u64(),
+    sharesMinted: r.u128(),
+    totalShares: r.u128(),
+    navLamports: r.u64(),
+  };
+}
+
+/**
+ * Scan transaction log lines for the FIRST `Deposited` event emitted for
+ * `vault` by `depositor`. Returns null when the transaction carries none
+ * (so callers can say "this signature is not a deposit into this vault"
+ * instead of inventing a number).
+ */
+export function findDepositedEvent(
+  logs: readonly string[],
+  vault: PublicKey,
+  depositor: PublicKey,
+): DepositedEvent | null {
+  for (const line of logs) {
+    const m = /^Program data: (.+)$/.exec(line.trim());
+    if (!m?.[1]) continue;
+    let decoded: DepositedEvent;
+    try {
+      decoded = decodeDepositedEvent(Buffer.from(m[1], "base64"));
+    } catch {
+      continue; // some other event, or not an event at all
+    }
+    if (decoded.vault.equals(vault) && decoded.depositor.equals(depositor)) return decoded;
+  }
+  return null;
+}

@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:400px;height:400px;overflow:hidden}
+  body{background:#ffb000;display:grid;place-items:center;position:relative}
+  /* dot grid, same pitch language as the app, subtle on amber */
+  body::before{content:"";position:absolute;inset:0;
+    background-image:radial-gradient(rgba(10,10,8,.14) 1.5px,transparent 1.5px);
+    background-size:26px 26px}
+  .c{position:relative;font-family:"Space Mono",monospace;font-weight:700;
+     font-size:268px;line-height:1;color:#0a0a08;letter-spacing:-.02em;
+     margin-top:-10px}
+  /* hard inner rule — the brutalist border, not decoration */
+  .frame{position:absolute;inset:26px;border:6px solid #0a0a08}
+</style></head><body><div class="frame"></div><div class="c">C</div></body></html>

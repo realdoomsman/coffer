@@ -138,6 +138,18 @@ export const env = {
   get solanaKeypairPath(): string {
     return str("SOLANA_KEYPAIR_PATH", str("SOLANA_KEYPAIR", ""));
   },
+  /**
+   * Platform-controlled escrow wallet that holds the VESTED third of each
+   * trader's performance fee for VEST_LOCK_DAYS. A dedicated keypair —
+   * never the server/deployer key. Only the PUBKEY is ever read here; the
+   * secret lives in .keys/fee-escrow.json (gitignored) and the API has no
+   * reason to load it, because on devnet the paper ledger's escrow leg is
+   * bookkeeping, not a lamport transfer. Undefined = unconfigured, which
+   * /api/vested reports honestly instead of inventing a destination.
+   */
+  get feeEscrowWallet(): string | undefined {
+    return str("FEE_ESCROW_WALLET") || undefined;
+  },
   /** Public mainnet RPC for read-only wallet scans (keyless works, rate-limited). */
   get mainnetRpcUrl(): string {
     return str("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com");

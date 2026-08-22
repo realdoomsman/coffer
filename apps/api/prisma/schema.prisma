@@ -46,6 +46,7 @@ model User {
   trackedWallets   TrackedWallet[]
   vaultDepositors  VaultDepositor[]
   onchainDeposits  OnChainDeposit[]
+  vestedFees       VestedFee[]
 
   @@index([walletAddress])
 }
@@ -79,9 +80,18 @@ model Vault {
   redeemWindowHours Int     @default(24)
   solBufferSol     Float    @default(0)
   thesis           String?
-  // fees crystallized on exits, accrued OUTSIDE tvl (owed, not equity):
-  // trader performance fee + platform cut (the buyback sink)
+  // fees crystallized on exits, accrued OUTSIDE tvl (owed, not equity).
+  // The trader's performance fee splits two ways: two thirds paid at
+  // once (traderFeesAccruedSol) and one third routed to the escrow
+  // wallet for 60 days (vestedFeesAccruedSol, mirrored row-by-row in
+  // VestedFee below). BOTH belong to the trader.
   traderFeesAccruedSol   Float @default(0)
+  vestedFeesAccruedSol   Float @default(0)
+  // DEPRECATED — the 10-point platform cut no longer exists; those points
+  // are now the trader's vested share. NOTHING increments this column.
+  // It is retained, not dropped, only so the historical amounts charged
+  // under the old 70/20/10 rule are not silently rewritten. It is no
+  // longer exposed by the API and must never be presented as a live fee.
   platformFeesAccruedSol Float @default(0)
 
   // ── on-chain link (mode = "real" only) ────────────────────────────
@@ -104,10 +114,44 @@ model Vault {
   dcaOrders        DcaOrder[]
   vaultDepositors  VaultDepositor[]
   onchainDeposits  OnChainDeposit[]
+  vestedFees       VestedFee[]
 
   @@index([traderId])
   @@index([type, status])
   @@index([mode])
+}
+
+// One escrowed tranche of a trader's performance fee. Created every time
+// profit crystallizes: the immediate two thirds credit the vault's
+// traderFeesAccruedSol, the remaining third lands here, locked for
+// VEST_LOCK_SECONDS (60 days) from the moment it crystallized.
+//
+// STATUS IS A FUNCTION OF TIME, not of a scheduler. "locked" becomes
+// "claimable" the instant `unlocksAt <= now`; the API computes that on
+// read and persists the flip opportunistically, so a stopped cron can
+// never strand a trader's money. Only "claimed" is a real state change.
+//
+// NOTE (devnet): amountSol is bookkeeping. `escrowWallet` records the
+// destination the tranche is booked against; no lamports move for paper
+// vaults, and claimSig stays null until a real transfer backs a claim.
+model VestedFee {
+  id             String  @id @default(cuid())
+  vaultId        String
+  vault          Vault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  traderId       String
+  trader         User    @relation(fields: [traderId], references: [id])
+  amountSol      Float
+  crystallizedAt Int // unix seconds
+  unlocksAt      Int // unix seconds — crystallizedAt + 60 days
+  status         String  @default("locked") // "locked" | "claimable" | "claimed"
+  claimedAt      Int? // unix seconds, set when status flips to "claimed"
+  claimSig       String? // on-chain transfer backing the claim, when there is one
+  /** escrow pubkey this tranche is booked against (FEE_ESCROW_WALLET) */
+  escrowWallet   String?
+
+  @@index([traderId, status])
+  @@index([vaultId])
+  @@index([unlocksAt])
 }
 
 model EquityPoint {
@@ -212,7 +256,8 @@ model Deposit {
 
 // Per-(vault, depositor) position ledger — the paper twin of the Anchor
 // program's VaultDepositor PDA. Fees crystallize per-portion on exit:
-// profit = gross − proportional cost basis, split 70/20/10.
+// profit = gross − proportional cost basis, split 70/30 (depositor keeps
+// 70%; the trader's 30% is two thirds cash, one third 60-day escrow).
 model VaultDepositor {
   id       String @id @default(cuid())
   vaultId  String

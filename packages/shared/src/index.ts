@@ -15,12 +15,43 @@ export type VaultMode = "real" | "paper";
 export type TradeSide = "buy" | "sell";
 export type WithdrawStatus = "pending" | "executable" | "paid" | "cancelled";
 
-// Fee split at profit crystallization (basis points of profit).
-// 70% depositor / 20% trader (creator-set 10–30%) / 10% platform → buyback+lock.
-export const PERF_FEE_DEFAULT_BPS = 2000;
+// ── Fee split at profit crystallization (basis points of profit) ────
+// 70% depositor / 30% trader. There is NO platform cut: the 10 points
+// that used to fund the buyback now belong to the trader, time-locked.
+//
+// THE RULE (one rule, no special cases): the creator picks a total
+// performance fee inside [PERF_FEE_MIN_BPS, PERF_FEE_MAX_BPS]. Exactly
+// ONE THIRD of whatever they picked is routed to the platform-controlled
+// escrow wallet and locked for VEST_LOCK_DAYS; the other two thirds are
+// paid to the trader immediately, as before. At the 30% default that is
+// the headline split — 20 points now, 10 points vested for 60 days.
+//
+// WHY: it aligns traders long-term. A trader who blows up or disappears
+// cannot walk away with their whole fee the same day they earned it.
+//
+// The depositor's side is UNAFFECTED by the vesting split: they always
+// pay exactly perfFeeBps of profit, whatever the trader does with it.
+export const PERF_FEE_DEFAULT_BPS = 3000;
 export const PERF_FEE_MIN_BPS = 1000;
 export const PERF_FEE_MAX_BPS = 3000;
-export const PLATFORM_PROFIT_BPS = 1000;
+/** Denominator of the vested share of the performance fee (1/3 vests). */
+export const PERF_FEE_VEST_DIVISOR = 3;
+/** Escrow lock length. Bookkeeping clock, not a program clock — see FeeBreakdown. */
+export const VEST_LOCK_DAYS = 60;
+export const VEST_LOCK_SECONDS = VEST_LOCK_DAYS * 86_400;
+
+/**
+ * Split a total performance fee into the part paid now and the part that
+ * goes to escrow. The two ALWAYS sum back to `perfFeeBps` exactly, so no
+ * rounding can leak value into or out of the depositor's payout.
+ */
+export function splitPerfFeeBps(perfFeeBps: number): {
+  immediateBps: number;
+  vestedBps: number;
+} {
+  const vestedBps = Math.round(perfFeeBps / PERF_FEE_VEST_DIVISOR);
+  return { immediateBps: perfFeeBps - vestedBps, vestedBps };
+}
 // Swap fee on vault trades (SOL leg, Jupiter Router platformFeeBps).
 export const VAULT_SWAP_FEE_BPS = 20;
 // Terminal (personal, non-vault) swap fee — market standard headline.
@@ -89,10 +120,14 @@ export interface Vault {
   redeemWindowHours: number;
   /** SOL held unallocated — instant withdrawals draw from this */
   solBufferSol: number;
-  /** crystallized on exits, held outside tvl: trader perf fees */
+  /** crystallized on exits, held outside tvl: trader perf fees paid immediately */
   traderFeesAccruedSol: number;
-  /** crystallized on exits, held outside tvl: platform cut (buyback sink) */
-  platformFeesAccruedSol: number;
+  /**
+   * crystallized on exits and routed to the escrow wallet: the trader's
+   * vested fee, locked VEST_LOCK_DAYS before they can claim it. Owed to
+   * the TRADER, not the platform — the platform takes no cut.
+   */
+  vestedFeesAccruedSol: number;
   thesis?: string;
   stats: VaultStats;
   equityCurve: EquityPoint[];
@@ -142,17 +177,59 @@ export interface WithdrawRequest {
 }
 
 /**
- * Fee crystallization on exit (the 70/20/10 money flow). Profit is
+ * Fee crystallization on exit (the 70/30 money flow). Profit is
  * per-portion: gross proceeds minus the proportional cost basis of the
  * shares being burned. No profit → no fees, ever.
+ *
+ * The depositor only ever sees `perfFeeSol` leave: paidSol is exactly
+ * `grossSol − perfFeeSol`. How the trader's side is split between cash
+ * now and escrow is invisible to them, by design.
  */
 export interface FeeBreakdown {
   grossSol: number;
   costBasisSol: number;
   profitSol: number;
+  /** total performance fee charged: traderFeeSol + traderVestedSol */
+  perfFeeSol: number;
+  /** paid to the trader immediately (two thirds of perfFeeSol) */
   traderFeeSol: number;
-  platformFeeSol: number;
+  /** routed to the escrow wallet, claimable after VEST_LOCK_DAYS */
+  traderVestedSol: number;
   paidSol: number;
+}
+
+// ── vested (escrowed) trader fees ──────────────────────────────────
+
+/** A tranche flips locked → claimable purely by time; no cron involved. */
+export type VestedFeeStatus = "locked" | "claimable" | "claimed";
+
+export interface VestedFeeTranche {
+  id: string;
+  vaultId: string;
+  vaultName: string;
+  traderId: string;
+  amountSol: number;
+  /** unix seconds */
+  crystallizedAt: number;
+  /** unix seconds — crystallizedAt + VEST_LOCK_SECONDS */
+  unlocksAt: number;
+  status: VestedFeeStatus;
+  claimedAt?: number;
+  claimSig?: string;
+  /** escrow wallet this tranche is booked against */
+  escrowWallet?: string;
+}
+
+export interface VestedFeeSummary {
+  traderId: string;
+  /** the platform-controlled escrow destination (null when unconfigured) */
+  escrowWallet: string | null;
+  lockedSol: number;
+  claimableSol: number;
+  claimedSol: number;
+  /** unix seconds of the soonest still-locked unlock, null when none */
+  nextUnlockAt: number | null;
+  tranches: VestedFeeTranche[];
 }
 
 export interface Holding {

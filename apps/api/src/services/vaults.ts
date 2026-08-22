@@ -336,7 +336,7 @@ export async function assembleVaults(
       redeemWindowHours: v.redeemWindowHours,
       solBufferSol: v.solBufferSol,
       traderFeesAccruedSol: v.traderFeesAccruedSol,
-      platformFeesAccruedSol: v.platformFeesAccruedSol,
+      vestedFeesAccruedSol: v.vestedFeesAccruedSol,
       thesis: v.thesis ?? undefined,
       stats,
       equityCurve: options.curvePoints ? downsample(curve, options.curvePoints) : curve,

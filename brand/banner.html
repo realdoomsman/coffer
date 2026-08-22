@@ -1,0 +1,37 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1500px;height:500px;overflow:hidden}
+  body{background:#0a0a08;position:relative;font-family:"IBM Plex Mono",monospace;color:#e9e6da}
+  body::before{content:"";position:absolute;inset:0;
+    background-image:radial-gradient(rgba(233,230,218,.05) 1.5px,transparent 1.5px);
+    background-size:26px 26px}
+  /* X overlays the avatar bottom-LEFT and crops top/bottom on mobile:
+     keep everything vertically centred and clear of the left 380px. */
+  .wrap{position:relative;height:100%;display:flex;align-items:center;
+        padding-left:400px;padding-right:70px}
+  .eyebrow{font-size:19px;letter-spacing:.30em;text-transform:uppercase;color:#ffb000;margin-bottom:22px}
+  h1{font-family:"Space Mono",monospace;font-weight:700;font-size:62px;line-height:1.08;
+     text-transform:uppercase;letter-spacing:.01em;margin-bottom:20px}
+  h1 .a{color:#ffb000}
+  .sub{font-size:21px;color:#9a968a;letter-spacing:.01em}
+  .rule{width:96px;height:4px;background:#ffb000;margin:26px 0 24px}
+  .facts{display:flex;gap:14px}
+  .fact{border:1px solid #38382f;padding:9px 15px;font-size:16px;color:#9a968a;letter-spacing:.04em}
+  .fact b{color:#e9e6da;font-weight:600}
+  .url{position:absolute;right:70px;bottom:52px;font-size:20px;color:#ffb000;letter-spacing:.10em}
+</style></head><body>
+<div class="wrap"><div>
+  <div class="eyebrow">Trader vaults on Solana</div>
+  <h1>Back the best traders.<br><span class="a">They can never run.</span></h1>
+  <div class="rule"></div>
+  <div class="facts">
+    <div class="fact"><b>70%</b> to depositors</div>
+    <div class="fact">Traders trade. <b>They can't withdraw.</b></div>
+    <div class="fact"><b>Every record</b> on-chain</div>
+  </div>
+</div></div>
+<div class="url">coffer.fun</div>
+</body></html>

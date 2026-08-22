@@ -1,19 +1,29 @@
 // ── fee crystallization ─────────────────────────────────────────────
-// The 70/20/10 money flow, per-portion (the same design the Anchor
-// program uses — see programs/vault/src/instructions/withdraw.rs):
+// The 70/30 money flow, per-portion:
 //
 //   profit    = gross proceeds − proportional cost basis of the shares
 //               being burned (never negative)
-//   traderFee = profit × perfFeeBps / 10_000        (creator-set 10–30%)
-//   platform  = profit × PLATFORM_PROFIT_BPS / 10_000 (10% → buyback sink)
-//   payout    = gross − traderFee − platform
+//   perfFee   = profit × perfFeeBps / 10_000       (creator-set 10–30%)
+//     ├─ traderFee    = perfFee − vested           (paid to the trader now)
+//     └─ traderVested = profit × vestedBps / 10_000 (escrow, locked 60d)
+//   payout    = gross − perfFee
+//
+// THE DEPOSITOR INVARIANT: `paidSol === grossSol − perfFeeSol`, and
+// perfFeeSol is derived from perfFeeBps alone. The vesting split is
+// computed from perfFeeSol AFTERWARDS and the immediate leg is the
+// remainder, so no rounding in the split can ever move the depositor's
+// payout by a single lamport. A depositor's economics under 30% with
+// vesting are byte-identical to a flat 30%.
+//
+// There is NO platform cut. The 10 points that used to fund the buyback
+// are the trader's — they just cannot be touched for 60 days.
 //
 // Losses pay gross with zero fees. Fees accrue on the vault OUTSIDE tvl
 // (they are owed, not depositor equity), so per-share value is untouched
 // by a fair exit and remaining depositors never subsidize fees.
 
 import type { FeeBreakdown } from "@coffer/shared";
-import { PLATFORM_PROFIT_BPS } from "@coffer/shared";
+import { splitPerfFeeBps, VEST_LOCK_SECONDS } from "@coffer/shared";
 
 export function crystallize(opts: {
   grossSol: number;
@@ -29,15 +39,28 @@ export function crystallize(opts: {
   const fraction = positionShares > 0 ? Math.min(1, shares / positionShares) : 1;
   const costBasisSol = positionCostSol * fraction;
   const profitSol = Math.max(0, grossSol - costBasisSol);
-  const traderFeeSol = (profitSol * perfFeeBps) / 10_000;
-  const platformFeeSol = (profitSol * PLATFORM_PROFIT_BPS) / 10_000;
-  const paidSol = grossSol - traderFeeSol - platformFeeSol;
+
+  // The depositor's whole cost, computed once, from the headline rate.
+  const perfFeeSol = (profitSol * perfFeeBps) / 10_000;
+  // Then split the TRADER's side. immediate = total − vested keeps the
+  // two legs summing back to perfFeeSol exactly.
+  const { vestedBps } = splitPerfFeeBps(perfFeeBps);
+  const traderVestedSol = (profitSol * vestedBps) / 10_000;
+  const traderFeeSol = perfFeeSol - traderVestedSol;
+
+  const paidSol = grossSol - perfFeeSol;
   return {
     grossSol,
     costBasisSol,
     profitSol,
+    perfFeeSol,
     traderFeeSol,
-    platformFeeSol,
+    traderVestedSol,
     paidSol,
   };
+}
+
+/** unix seconds at which a tranche crystallized `atSec` unlocks. */
+export function unlockAt(atSec: number): number {
+  return atSec + VEST_LOCK_SECONDS;
 }

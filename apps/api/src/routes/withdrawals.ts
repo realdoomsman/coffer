@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
-import { crystallize } from "../services/fees.js";
+import { env } from "../env.js";
+import { crystallize, unlockAt } from "../services/fees.js";
 import { REAL_VAULT_WALL } from "../services/trading.js";
 import { assembleVault, toWithdrawRequest } from "../services/vaults.js";
 
@@ -52,7 +53,7 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
     const depositor = await prisma.vaultDepositor.findUnique({
       where: { vaultId_userId: { vaultId: vault.id, userId: request.userId } },
     });
-    // crystallize the 70/20/10 split against this portion's cost basis
+    // crystallize the 70/30 split against this portion's cost basis
     const fees = crystallize({
       grossSol,
       positionCostSol: depositor?.costSol ?? grossSol,
@@ -100,8 +101,10 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
           totalShares: newShares,
           solBufferSol: { decrement: grossSol },
           sharePriceSol: newSharePrice,
+          // only the IMMEDIATE leg is spendable trader fees; the vested
+          // leg is escrowed for 60 days (VestedFee row below)
           traderFeesAccruedSol: { increment: fees.traderFeeSol },
-          platformFeesAccruedSol: { increment: fees.platformFeeSol },
+          vestedFeesAccruedSol: { increment: fees.traderVestedSol },
         },
       }),
       prisma.equityPoint.upsert({
@@ -109,6 +112,23 @@ withdrawalsRouter.post("/:id/execute", async (req, res, next) => {
         update: { v: newSharePrice },
         create: { vaultId: vault.id, t: now, v: newSharePrice },
       }),
+      // The escrowed third. Locked 60 days from the moment it
+      // crystallizes — which is NOW, at execution, not at request time.
+      ...(fees.traderVestedSol > 0
+        ? [
+            prisma.vestedFee.create({
+              data: {
+                vaultId: vault.id,
+                traderId: vault.traderId,
+                amountSol: fees.traderVestedSol,
+                crystallizedAt: now,
+                unlocksAt: unlockAt(now),
+                status: "locked",
+                escrowWallet: env.feeEscrowWallet ?? null,
+              },
+            }),
+          ]
+        : []),
     ]);
 
     const assembled = await assembleVault(vault.id);
