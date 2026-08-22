@@ -945,3 +945,63 @@ select { max-width: 260px; }
     height: 32px;
   }
 }
+
+/* ── trade feed ──────────────────────────────────────────────────── */
+.sectiontitle.tapehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* your own fills and followed wallets have to be findable in a moving
+   tape without reading every row */
+tr.rowmine td {
+  background: var(--amber-dim);
+}
+tr.rowtracked td {
+  background: rgba(125, 185, 255, 0.07);
+}
+.pill.you {
+  background: var(--amber);
+  color: var(--ink);
+  border-color: var(--amber);
+}
+.pill.tracked {
+  color: #7db9ff;
+  border-color: rgba(125, 185, 255, 0.45);
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── token facts panel ───────────────────────────────────────────── */
+.factrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.factrow .k {
+  color: var(--muted);
+}
+.factrow .v {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.factrow .v.pos { color: var(--green); }
+.factrow .v.neg { color: var(--red); }
+.factrow .v.warn { color: var(--amber); }
+.factrow .v.dim { color: var(--dim); }
+.factloading {
+  font-size: 12px;
+  color: var(--dim);
+}
+.factnote {
+  margin-top: 7px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--dim);
+}

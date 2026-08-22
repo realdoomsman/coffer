@@ -31,6 +31,7 @@ import { usePresets } from "../lib/presets";
 import { useWatchlist } from "../lib/watchlist";
 import { useToast } from "../lib/toast";
 import { Skeleton } from "../components/bits";
+import { TokenFacts } from "../components/TokenFacts";
 import { RatioBar, TimeframeStrip } from "../components/market";
 
 const TFS = ["1m", "5m", "15m", "1h"] as const;
@@ -420,6 +421,94 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     });
   }, [marks, mint, tf, denom, supplyUi]);
 
+  // ── trade feed ───────────────────────────────────────────────────
+  // One tape, three lenses. "You" is the honest one: paper fills are
+  // ledger entries with no signature, so they say "ledger" instead of
+  // linking to a transaction that does not exist.
+  // Highest close on the candles currently loaded. Deliberately not called
+  // an all-time high — it is only as deep as the window fetched.
+  const periodHighUsd = useMemo(() => {
+    const bars = rawCandles.current;
+    if (bars.length === 0) return null;
+    return bars.reduce((m, c) => (c.h > m ? c.h : m), 0) || null;
+    // candleVer ticks on every refresh, which is exactly when this changes
+  }, [candleVer]);
+
+  const [tapeTab, setTapeTab] = useState<"all" | "tracked" | "mine">("all");
+
+  const trackedLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const w of tracked ?? []) m.set(w.address, w.label || shortAddr(w.address, 4));
+    return m;
+  }, [tracked]);
+
+  interface TapeRow {
+    key: string;
+    ts: number;
+    side: "buy" | "sell";
+    amountUsd: number | null;
+    priceUsd: number;
+    wallet: string | null;
+    txSig: string | null;
+    mine: boolean;
+    trackedLabel: string | null;
+  }
+
+  const poolRows = useMemo<TapeRow[]>(
+    () =>
+      (poolTape ?? []).map((t) => ({
+        key: t.txSig,
+        ts: t.ts,
+        side: t.side,
+        amountUsd: t.amountUsd,
+        priceUsd: t.priceUsd,
+        wallet: t.wallet,
+        txSig: t.txSig,
+        mine: false,
+        trackedLabel: trackedLabels.get(t.wallet) ?? null,
+      })),
+    [poolTape, trackedLabels],
+  );
+
+  const myRows = useMemo<TapeRow[]>(
+    () =>
+      vaultTrades
+        .filter((t) => t.mint === mint)
+        .map((t) => ({
+          key: t.id,
+          ts: t.ts,
+          side: t.side,
+          amountUsd: solUsd ? t.solAmount * solUsd : null,
+          priceUsd: solUsd ? t.priceSol * solUsd : 0,
+          wallet: null,
+          // paper fills carry a "demo-" sentinel, not a signature — linking
+          // one to an explorer would be inventing a transaction
+          txSig: t.txSig.startsWith("demo-") ? null : t.txSig,
+          mine: true,
+          trackedLabel: null,
+        })),
+    [vaultTrades, mint, solUsd],
+  );
+
+  const tapeCounts = useMemo(
+    () => ({
+      tracked: poolRows.filter((r) => r.trackedLabel).length,
+      mine: myRows.length,
+    }),
+    [poolRows, myRows],
+  );
+
+  const tapeRows = useMemo(() => {
+    const rows =
+      tapeTab === "mine"
+        ? myRows
+        : tapeTab === "tracked"
+          ? poolRows.filter((r) => r.trackedLabel)
+          : // "All" interleaves your own fills so you can see them in context
+            [...poolRows, ...myRows];
+    return rows.sort((a, b) => b.ts - a.ts).slice(0, 12);
+  }, [tapeTab, poolRows, myRows]);
+
   const heldPosition = positions.find((p) => p.mint === mint) ?? null;
   const amountNum = parseFloat(amount) || 0;
 
@@ -777,10 +866,30 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
             )}
           </div>
 
-          <div className="sectiontitle">Pool tape — live on-chain trades</div>
+          <div className="sectiontitle tapehead">
+            <span>Trade feed</span>
+            <div className="chipsrow">
+              {(["all", "tracked", "mine"] as const).map((t) => (
+                <button
+                  key={t}
+                  className={`chip ${tapeTab === t ? "on" : ""}`}
+                  onClick={() => setTapeTab(t)}
+                >
+                  {t === "all" ? "All" : t === "tracked" ? "Tracked" : "You"}
+                  {t !== "all" && tapeCounts[t] > 0 && <span className="num"> {tapeCounts[t]}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="panel" style={{ marginBottom: 14 }}>
-            {!poolTape || poolTape.length === 0 ? (
-              <div className="empty">No recent pool trades surfaced</div>
+            {tapeRows.length === 0 ? (
+              <div className="empty">
+                {tapeTab === "mine"
+                  ? "No fills from this vault on this token yet"
+                  : tapeTab === "tracked"
+                    ? "None of the wallets you track have touched this token"
+                    : "No recent pool trades surfaced"}
+              </div>
             ) : (
               <div className="tablewrap">
                 <table className="data">
@@ -795,24 +904,36 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {poolTape.slice(0, 10).map((t) => {
+                    {tapeRows.map((t) => {
                       const age = Math.max(1, Math.floor(Date.now() / 1000 - t.ts));
                       const ageStr = age < 60 ? `${age}s` : age < 3600 ? `${Math.floor(age / 60)}m` : `${Math.floor(age / 3600)}h`;
                       return (
-                        <tr key={t.txSig}>
+                        <tr key={t.key} className={t.mine ? "rowmine" : t.trackedLabel ? "rowtracked" : undefined}>
                           <td className="num dimtx">{ageStr}</td>
                           <td>
                             <span className={`num ${t.side === "buy" ? "pos" : "neg"}`}>
                               {t.side.toUpperCase()}
                             </span>
                           </td>
-                          <td className="r num">{fmtUsd(t.amountUsd)}</td>
+                          <td className="r num">{t.amountUsd === null ? "—" : fmtUsd(t.amountUsd)}</td>
                           <td className="r num dimtx">{fmtUsd(t.priceUsd)}</td>
-                          <td className="r num dimtx">{shortAddr(t.wallet, 4)}</td>
+                          <td className="r num">
+                            {t.mine ? (
+                              <span className="pill you">you</span>
+                            ) : t.trackedLabel ? (
+                              <span className="pill tracked" title={t.wallet ?? ""}>{t.trackedLabel}</span>
+                            ) : (
+                              <span className="dimtx">{t.wallet ? shortAddr(t.wallet, 4) : "—"}</span>
+                            )}
+                          </td>
                           <td className="r">
-                            <a className="num dimtx" href={solscanTx(t.txSig)} target="_blank" rel="noreferrer">
-                              {shortAddr(t.txSig, 4)}
-                            </a>
+                            {t.txSig ? (
+                              <a className="num dimtx" href={solscanTx(t.txSig)} target="_blank" rel="noreferrer">
+                                {shortAddr(t.txSig, 4)}
+                              </a>
+                            ) : (
+                              <span className="dimtx" title="Paper fill — a ledger entry, never on chain">ledger</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1131,6 +1252,13 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
               ))
             )}
           </div>
+          <TokenFacts
+            mint={mint}
+            info={info ?? null}
+            stats={poolStats ?? null}
+            supplyUi={supplyUi}
+            athUsd={periodHighUsd}
+          />
         </div>
       </div>
     </>
