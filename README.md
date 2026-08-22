@@ -47,6 +47,97 @@ Copy `.env.example` → `.env`. Notable:
 - Mainnet execution stays gated behind `I_UNDERSTAND_LIVE_TRADING_RISKS=yes`. Devnet is
   the default everywhere.
 
+## Production Deployment
+
+### Railway Deployment
+
+The project is configured for Railway deployment with automatic CI/CD:
+
+1. **Railway Configuration**: `railway.json` contains health checks and deployment settings
+2. **Environment Variables**: See `.env.production.example` for required variables
+3. **Database Migration**: Run `bash scripts/migrate-production.sh` after deployment
+4. **CI/CD Pipeline**: GitHub Actions in `.github/workflows/deploy.yml` handles:
+   - Automated testing on push
+   - API deployment to Railway (production branch)
+   - Web deployment to Vercel with CloudFront cache invalidation
+
+### Manual Deployment
+
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login to Railway
+railway login
+
+# Initialize project (first time)
+railway init
+
+# Add PostgreSQL database
+railway add postgresql
+
+# Deploy API
+cd apps/api
+railway up
+
+# Deploy web (Vercel)
+cd apps/web
+vercel --prod
+```
+
+### Environment Setup
+
+Set these environment variables in Railway:
+
+```bash
+# Database (auto-created by Railway)
+DATABASE_URL=postgresql://...
+
+# Solana
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+SOLANA_CLUSTER=mainnet-beta
+VAULT_PROGRAM_ID=8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U
+SERVER_KEYPAIR_BASE64=...
+
+# Privy
+PRIVY_APP_ID=...
+PRIVY_APP_SECRET=...
+
+# External APIs
+JUPITER_API_KEY=...
+BIRDEYE_API_KEY=...
+HELIUS_API_KEY=...
+```
+
+### Migration and Seeding
+
+```bash
+# Generate Prisma client
+npx prisma generate
+
+# Push schema to production
+npx prisma db push --accept-data-loss
+
+# Or run the migration script
+bash scripts/migrate-production.sh
+```
+
+### Monitoring
+
+- **Health Check**: `https://your-app.railway.app/api/health`
+- **Logs**: Railway dashboard logs
+- **Database**: Railway PostgreSQL dashboard
+
+## Security & Audit
+
+Security documentation and audit preparation materials are in `AUDIT_PREP.md`:
+- Architecture overview
+- Threat model
+- Known issues
+- Security checklist
+- Deployment verification
+- Vulnerability scan reports
+
 ## Status (P0)
 
 - [x] Monorepo, shared types, dark terminal UI (explore / vault / portfolio / terminal /

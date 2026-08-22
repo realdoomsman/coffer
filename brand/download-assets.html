@@ -1,0 +1,259 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Download Generated Assets</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a08;
+  color: #e9e6da;
+  font-family: "IBM Plex Mono", monospace;
+  padding: 40px;
+  max-width: 800px;
+}
+h1 {
+  font-family: "Space Mono", monospace;
+  font-size: 24px;
+  color: #ffb000;
+  margin-bottom: 20px;
+  letter-spacing: 2px;
+}
+p {
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+a {
+  color: #6fb3ff;
+  text-decoration: none;
+}
+a:hover {
+  color: #ffb000;
+}
+.canvas-wrapper {
+  margin: 30px 0;
+  border: 1px solid #262620;
+  padding: 20px;
+}
+canvas {
+  display: block;
+  margin: 10px 0;
+  background: #000;
+}
+.btn {
+  display: inline-block;
+  background: #ffb000;
+  color: #0a0a08;
+  padding: 12px 24px;
+  font-family: "Space Mono", monospace;
+  font-weight: 700;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  margin-right: 10px;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+.btn:hover {
+  background: #e99e00;
+}
+.info {
+  color: #9a968a;
+  font-size: 12px;
+  margin-top: 8px;
+}
+</style>
+</head>
+<body>
+<h1>COFFER ASSETS</h1>
+
+<p>Clean, terminal-style branding matching the Coffer website UI.</p>
+
+<div class="canvas-wrapper">
+  <h2 style="font-family: 'Space Mono'; color: #ffb000; margin-bottom: 10px;">Profile Picture (400×400)</h2>
+  <canvas id="pfp" width="400" height="400"></canvas>
+  <button class="btn" onclick="downloadPFP()">Download PFP</button>
+  <div class="info">Crops to circle on X. Amber "C" on ink with dot grid.</div>
+</div>
+
+<div class="canvas-wrapper">
+  <h2 style="font-family: 'Space Mono'; color: #ffb000; margin-bottom: 10px;">Banner (1500×500)</h2>
+  <canvas id="banner" width="1500" height="500"></canvas>
+  <button class="btn" onclick="downloadBanner()">Download Banner</button>
+  <div class="info">Terminal-style layout. Safe area for avatar placement.</div>
+</div>
+
+<script>
+const INK = "#0a0a08";
+const AMBER = "#ffb000";
+const TEXT = "#e9e6da";
+const MUTED = "#9a968a";
+const LINE = "#262620";
+const DOT_GRID_SPACING = 22;
+
+function drawDotGrid(ctx, width, height, color, spacing) {
+  ctx.fillStyle = color;
+  for (let y = spacing / 2; y < height; y += spacing) {
+    for (let x = spacing / 2; x < width; x += spacing) {
+      ctx.beginPath();
+      ctx.arc(x, y, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawPfp() {
+  const c = document.getElementById('pfp');
+  const ctx = c.getContext('2d');
+  const S = 400;
+  const M = S / 2;
+
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, S, S);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(M, M, M, 0, Math.PI * 2);
+  ctx.clip();
+  drawDotGrid(ctx, S, S, "rgba(233, 230, 218, 0.04)", DOT_GRID_SPACING);
+  ctx.restore();
+
+  ctx.fillStyle = AMBER;
+  ctx.beginPath();
+  ctx.arc(M, M, M - 30, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(M, M, M - 40, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.fillStyle = INK;
+  ctx.font = '700 180px "Space Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('C', M, M + 8);
+}
+
+function drawBanner() {
+  const c = document.getElementById('banner');
+  const ctx = c.getContext('2d');
+  const W = 1500;
+  const H = 500;
+
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, W, H);
+
+  drawDotGrid(ctx, W, H, "rgba(233, 230, 218, 0.035)", DOT_GRID_SPACING);
+
+  ctx.fillStyle = AMBER;
+  ctx.fillRect(0, 0, 8, H);
+
+  const X = 340;
+  const startY = 130;
+  let y = startY;
+
+  ctx.fillStyle = AMBER;
+  ctx.font = '600 18px "Space Mono", monospace';
+  ctx.letterSpacing = '6px';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('TRADER VAULTS ON SOLANA', X, y + 18);
+  y += 35;
+
+  ctx.font = '700 72px "Space Mono", monospace';
+  ctx.letterSpacing = '2px';
+  ctx.fillStyle = TEXT;
+  ctx.fillText('BACK THE BEST.', X, y + 72);
+  y += 90;
+
+  ctx.fillStyle = AMBER;
+  ctx.fillText('THEY CAN NEVER RUN.', X, y + 72);
+  y += 100;
+
+  ctx.font = '500 16px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '0px';
+
+  const chips = [
+    { label: '70%', sub: 'to depositors' },
+    { label: 'Traders', sub: 'trade, can\'t withdraw' },
+    { label: 'On-chain', sub: 'every record' }
+  ];
+
+  let cx = X;
+  for (const chip of chips) {
+    const labelWidth = ctx.measureText(chip.label).width;
+    const subWidth = ctx.measureText(chip.sub).width;
+    const chipWidth = labelWidth + subWidth + 35;
+    const chipHeight = 42;
+
+    ctx.strokeStyle = LINE;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx + 0.5, y + 0.5, chipWidth, chipHeight);
+
+    ctx.fillStyle = TEXT;
+    ctx.font = '600 16px "IBM Plex Mono", monospace';
+    ctx.fillText(chip.label, cx + 14, y + 26);
+
+    ctx.fillStyle = MUTED;
+    ctx.font = '500 16px "IBM Plex Mono", monospace';
+    ctx.fillText(chip.sub, cx + 14 + labelWidth + 8, y + 26);
+
+    cx += chipWidth + 12;
+  }
+
+  ctx.fillStyle = AMBER;
+  ctx.font = '600 20px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '2px';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('coffer.fun', W - 60, startY + 28);
+
+  const statusY = H - 50;
+  const statusX = W - 60;
+
+  ctx.fillStyle = AMBER;
+  ctx.beginPath();
+  ctx.arc(statusX - 8, statusY - 4, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 14px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '0px';
+  ctx.textAlign = 'left';
+  ctx.fillText('devnet live', statusX + 4, statusY);
+}
+
+function downloadPFP() {
+  const c = document.getElementById('pfp');
+  const link = document.createElement('a');
+  link.download = 'coffer-pfp.png';
+  link.href = c.toDataURL('image/png');
+  link.click();
+}
+
+function downloadBanner() {
+  const c = document.getElementById('banner');
+  const link = document.createElement('a');
+  link.download = 'coffer-banner.png';
+  link.href = c.toDataURL('image/png');
+  link.click();
+}
+
+(async () => {
+  await Promise.all([
+    document.fonts.load('700 180px "Space Mono"'),
+    document.fonts.load('600 18px "Space Mono"'),
+    document.fonts.load('700 72px "Space Mono"'),
+    document.fonts.load('500 16px "IBM Plex Mono"'),
+    document.fonts.load('600 16px "IBM Plex Mono"'),
+    document.fonts.load('600 20px "IBM Plex Mono"')
+  ]);
+  await document.fonts.ready;
+  drawPfp();
+  drawBanner();
+})();
+</script>
+</body>
+</html>

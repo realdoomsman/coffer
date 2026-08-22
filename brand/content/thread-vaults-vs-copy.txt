@@ -1,0 +1,23 @@
+Why vaults beat copy-trading.
+
+Copy-trading platforms let you follow individual trades. You copy each buy, each sell.
+
+But the trader can de-authorize you mid-position. You're stuck holding while they exit.
+
+Vaults solve this.
+
+With vaults, you own shares of the pool.
+
+The trader trades the entire pool. Your share value moves with their performance.
+
+You can sell your shares anytime. The trader cannot stop you.
+
+If the trader blows up, you lose whatever the pool lost — but you're never trapped.
+
+Performance is measured per-share, transparent and verifiable on-chain.
+
+70% of profits go to depositors (you). 30% goes to the trader.
+
+No hidden fees. No withdrawal limits. No de-auth risk.
+
+Back the best traders. They can never run.

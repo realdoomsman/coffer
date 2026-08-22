@@ -1,0 +1,220 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #1a1a1a;
+  padding: 20px;
+  font-family: monospace;
+  color: #e9e6da;
+}
+canvas {
+  display: block;
+  margin: 20px 0;
+  background: #000;
+}
+.lbl {
+  font-size: 12px;
+  color: #9a968a;
+  margin-top: 14px;
+  font-family: "IBM Plex Mono", monospace;
+}
+.circ {
+  border-radius: 50%;
+}
+</style>
+</head>
+<body>
+
+<div class="lbl">PFP 400×400 (circular crop shown)</div>
+<canvas id="pfp" class="circ" width="400" height="400"></canvas>
+
+<div class="lbl">Banner 1500×500</div>
+<canvas id="banner" width="1500" height="500"></canvas>
+
+<script>
+const INK = "#0a0a08";
+const AMBER = "#ffb000";
+const TEXT = "#e9e6da";
+const MUTED = "#9a968a";
+const LINE = "#262620";
+const DOT_GRID_SPACING = 22;
+
+function drawDotGrid(ctx, width, height, color, spacing) {
+  ctx.fillStyle = color;
+  for (let y = spacing / 2; y < height; y += spacing) {
+    for (let x = spacing / 2; x < width; x += spacing) {
+      ctx.beginPath();
+      ctx.arc(x, y, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// PFP - Clean, centered, matches sidebar brand mark
+function drawPfp() {
+  const c = document.getElementById('pfp');
+  const ctx = c.getContext('2d');
+  const S = 400;
+  const M = S / 2;
+
+  // Ink background
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, S, S);
+
+  // Dot grid (subtle, clipped to circle later)
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(M, M, M, 0, Math.PI * 2);
+  ctx.clip();
+  drawDotGrid(ctx, S, S, "rgba(233, 230, 218, 0.04)", DOT_GRID_SPACING);
+  ctx.restore();
+
+  // Amber circle (matches sidebar brand mark scaled up)
+  ctx.fillStyle = AMBER;
+  ctx.beginPath();
+  ctx.arc(M, M, M - 30, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Inner ring (subtle, matches terminal style)
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(M, M, M - 40, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // "C" letter - matches sidebar brand mark
+  ctx.fillStyle = INK;
+  ctx.font = '700 180px "Space Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('C', M, M + 8);
+}
+
+// Banner - Clean, terminal-style, data-focused
+function drawBanner() {
+  const c = document.getElementById('banner');
+  const ctx = c.getContext('2d');
+  const W = 1500;
+  const H = 500;
+
+  // Ink background
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, W, H);
+
+  // Dot grid (subtle)
+  drawDotGrid(ctx, W, H, "rgba(233, 230, 218, 0.035)", DOT_GRID_SPACING);
+
+  // Amber left spine (matches terminal style)
+  ctx.fillStyle = AMBER;
+  ctx.fillRect(0, 0, 8, H);
+
+  // Safe area: account for avatar placement (x >= 330, y: 120-380)
+  const X = 340;
+  const startY = 130;
+  let y = startY;
+
+  // Tagline - Space Mono, uppercase, letter-spaced
+  ctx.fillStyle = AMBER;
+  ctx.font = '600 18px "Space Mono", monospace';
+  ctx.letterSpacing = '6px';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('TRADER VAULTS ON SOLANA', X, y + 18);
+  y += 35;
+
+  // Headline - big, bold, two lines
+  ctx.font = '700 72px "Space Mono", monospace';
+  ctx.letterSpacing = '2px';
+  ctx.fillStyle = TEXT;
+  ctx.fillText('BACK THE BEST.', X, y + 72);
+  y += 90;
+
+  ctx.fillStyle = AMBER;
+  ctx.fillText('THEY CAN NEVER RUN.', X, y + 72);
+  y += 100;
+
+  // Data chips - hard 1px borders, terminal style
+  ctx.font = '500 16px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '0px';
+
+  const chips = [
+    { label: '70%', sub: 'to depositors' },
+    { label: 'Traders', sub: 'trade, can\'t withdraw' },
+    { label: 'On-chain', sub: 'every record' }
+  ];
+
+  let cx = X;
+  for (const chip of chips) {
+    const labelWidth = ctx.measureText(chip.label).width;
+    const subWidth = ctx.measureText(chip.sub).width;
+    const chipWidth = labelWidth + subWidth + 35;
+    const chipHeight = 42;
+
+    // Border
+    ctx.strokeStyle = LINE;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx + 0.5, y + 0.5, chipWidth, chipHeight);
+
+    // Label (amber, bold)
+    ctx.fillStyle = TEXT;
+    ctx.font = '600 16px "IBM Plex Mono", monospace';
+    ctx.fillText(chip.label, cx + 14, y + 26);
+
+    // Sub (muted, regular)
+    ctx.fillStyle = MUTED;
+    ctx.font = '500 16px "IBM Plex Mono", monospace';
+    ctx.fillText(chip.sub, cx + 14 + labelWidth + 8, y + 26);
+
+    cx += chipWidth + 12;
+  }
+
+  // URL - right-aligned, terminal style
+  ctx.fillStyle = AMBER;
+  ctx.font = '600 20px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '2px';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText('coffer.fun', W - 60, startY + 28);
+
+  // Status indicator (bottom right, terminal style)
+  const statusY = H - 50;
+  const statusX = W - 60;
+
+  // Status dot (amber, matches terminal)
+  ctx.fillStyle = AMBER;
+  ctx.beginPath();
+  ctx.arc(statusX - 8, statusY - 4, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Status text
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 14px "IBM Plex Mono", monospace';
+  ctx.letterSpacing = '0px';
+  ctx.textAlign = 'left';
+  ctx.fillText('devnet live', statusX + 4, statusY);
+}
+
+// Wait for fonts, then draw
+(async () => {
+  await Promise.all([
+    document.fonts.load('700 180px "Space Mono"'),
+    document.fonts.load('600 18px "Space Mono"'),
+    document.fonts.load('700 72px "Space Mono"'),
+    document.fonts.load('500 16px "IBM Plex Mono"'),
+    document.fonts.load('600 16px "IBM Plex Mono"'),
+    document.fonts.load('600 20px "IBM Plex Mono"')
+  ]);
+  await document.fonts.ready;
+  drawPfp();
+  drawBanner();
+  console.log('Assets generated. Right-click → Save Image As...');
+})();
+</script>
+</body>
+</html>

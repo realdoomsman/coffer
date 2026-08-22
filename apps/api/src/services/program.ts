@@ -34,11 +34,16 @@ import {
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { env } from "../env.js";
 
 // ── program id / seeds (state.rs) ──────────────────────────────────
 
 export const VAULT_PROGRAM_ID = new PublicKey(env.vaultProgramId);
+
+// External program IDs
+export const JUPITER_ROUTER_V6 = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+export const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
 export const VAULT_SEED = Buffer.from("vault");
 export const VAULT_DEPOSITOR_SEED = Buffer.from("vault_depositor");
@@ -102,6 +107,12 @@ class BorshWriter {
     this.chunks.push(b);
     return this;
   }
+  u32(v: number): this {
+    const b = Buffer.alloc(4);
+    b.writeUInt32LE(v);
+    this.chunks.push(b);
+    return this;
+  }
   i64(v: bigint): this {
     const b = Buffer.alloc(8);
     b.writeBigInt64LE(v);
@@ -122,6 +133,12 @@ class BorshWriter {
   /** Fixed-length byte array — NO length prefix (that is Vec<u8>). */
   fixedBytes(v: Buffer, len: number): this {
     if (v.length !== len) throw new Error(`expected ${len} bytes, got ${v.length}`);
+    this.chunks.push(Buffer.from(v));
+    return this;
+  }
+  /** Variable-length bytes — encodes as Vec<u8> (length prefix + bytes). */
+  bytes(v: Buffer): this {
+    this.u32(v.length);
     this.chunks.push(Buffer.from(v));
     return this;
   }
@@ -740,6 +757,112 @@ export function buildPostNavIx(params: {
       ixDiscriminator("post_nav"),
       new BorshWriter().u64(params.navLamports).u64(params.markSlot).toBuffer(),
     ]),
+  });
+}
+
+/**
+ * execute_swap — wraps a Jupiter Router v6 swap.
+ *
+ * This instruction authorizes a CPI to Jupiter Router v6 with the vault PDA
+ * as the signing authority. The vault program enforces:
+ *   - All token accounts are vault-owned (authority = vault PDA)
+ *   - One leg must be wSOL (vaults are SOL-denominated)
+ *   - maxIn/minOut bounds are respected after the CPI
+ *   - No third vault ATAs are drained
+ *
+ * Accounts (ExecuteSwap, in order from execute_swap.rs):
+ *   0  authority     signer (trader or operator)
+ *   1  vault         mut
+ *   2  jupiter       prog
+ *   3  token_program prog
+ *   4  system_program prog
+ *   5  input_token   mut (vault ATA, authority = vault)
+ *   6  output_token  mut (vault ATA, authority = vault)
+ *   7  wsol_token    mut (vault wSOL ATA, authority = vault)
+ *   8  [additional accounts for Jupiter route]
+ *
+ * Args: max_in u64, min_out u64, jupiter_instructions (vec), jupiter_accounts (vec)
+ */
+export function buildExecuteSwapIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  inputMint: PublicKey;
+  outputMint: PublicKey;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  maxIn: bigint;
+  jupiterInstructions: readonly any[];
+  jupiterAccounts: readonly PublicKey[];
+  programId?: PublicKey;
+}): TransactionInstruction {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+
+  // Build the required account keys
+  const keys: any[] = [
+    { pubkey: params.authority, isSigner: true, isWritable: false },
+    { pubkey: params.vault, isSigner: false, isWritable: true },
+    { pubkey: JUPITER_ROUTER_V6, isSigner: false, isWritable: false },
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+  ];
+
+  // Token accounts will be derived from the vault PDA and mints
+  // The actual ATA addresses should be passed from the caller
+  // For now, we'll add placeholders that need to be filled in
+  const inputToken = getAssociatedTokenAddressSync(
+    params.inputMint,
+    params.vault,
+    true,
+  );
+  const outputToken = getAssociatedTokenAddressSync(
+    params.outputMint,
+    params.vault,
+    true,
+  );
+  const wsolToken = getAssociatedTokenAddressSync(
+    WSOL_MINT,
+    params.vault,
+    true,
+  );
+
+  keys.push(
+    { pubkey: inputToken, isSigner: false, isWritable: true },
+    { pubkey: outputToken, isSigner: false, isWritable: true },
+    { pubkey: wsolToken, isSigner: false, isWritable: true },
+  );
+
+  // Add Jupiter accounts from the route
+  for (const acc of params.jupiterAccounts) {
+    keys.push({ pubkey: acc, isSigner: false, isWritable: false });
+  }
+
+  // Encode the instruction data
+  const writer = new BorshWriter();
+  writer.u64(params.maxIn);
+  writer.u64(params.minAmountOut);
+  
+  // Encode Jupiter instructions as a vec
+  writer.u32(params.jupiterInstructions.length);
+  for (const ix of params.jupiterInstructions) {
+    writer.u8(ix.programIdIndex);
+    writer.u32(ix.accountKeyIndexes.length);
+    for (const idx of ix.accountKeyIndexes) {
+      writer.u8(idx);
+    }
+    writer.u32(ix.data.length);
+    writer.bytes(Buffer.from(ix.data));
+  }
+
+  // Encode Jupiter accounts as a vec of pubkeys
+  writer.u32(params.jupiterAccounts.length);
+  for (const acc of params.jupiterAccounts) {
+    writer.bytes(acc.toBuffer());
+  }
+
+  return new TransactionInstruction({
+    programId,
+    keys,
+    data: Buffer.concat([ixDiscriminator("execute_swap"), writer.toBuffer()]),
   });
 }
 

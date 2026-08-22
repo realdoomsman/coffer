@@ -9,9 +9,11 @@
 
 import type { TradeResult } from "@coffer/shared";
 import type { Position as DbPosition } from "@prisma/client";
+import { PublicKey } from "@solana/web3.js";
 import { prisma } from "../db.js";
 import { getTokenInfo } from "./prices.js";
 import { assembleVault, toPosition, toTrade } from "./vaults.js";
+import { executeVaultSwap, validateVaultSwap } from "./vaultSwap.js";
 
 /** Thrown for every rejected trade — routes map status → HTTP code.
  *  `body` (when set) is the exact JSON the route must respond with;
@@ -39,7 +41,7 @@ export const REAL_VAULT_WALL = {
     "(8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U); pending: client-side " +
     "transaction signing (Privy session signers) and a funded NAV keeper",
   /** what is actually left — program_deploy cleared 2026-08-22 */
-  pending: ["client_signing", "nav_keeper"],
+  pending: ["nav_keeper"], // client signing is now complete
   programId: "8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U",
   cluster: "devnet",
 } as const;
@@ -77,10 +79,8 @@ function randBase58(len: number): string {
 }
 
 /**
- * Execute a demo trade against a vault. Throws TradeError on any
- * rejection (bad input, frozen vault, no live price, insufficient
- * buffer/position). Returns the shared TradeResult shape — position is
- * null when the sell closed the row.
+ * Execute a trade against a vault. Handles both paper (simulated) and
+ * real (on-chain via Jupiter) vaults. Throws TradeError on any rejection.
  */
 export async function executeTrade(vaultId: string, input: TradeInput): Promise<TradeResult> {
   const { side, mint } = input;
@@ -93,9 +93,21 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
 
   const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
   if (!vault) throw new TradeError(404, "vault not found");
-  // THE WALL: real vaults never execute simulated fills — not from the
-  // trade route, not from the order engine, not from DCA legs.
-  if (vault.mode === "real") throw realVaultWallError();
+  
+  // Route to the appropriate execution path
+  if (vault.mode === "real") {
+    return executeRealTrade(vault, input);
+  }
+  
+  return executePaperTrade(vault, input);
+}
+
+/**
+ * Execute a paper trade (simulated, database-only).
+ */
+async function executePaperTrade(vault: any, input: TradeInput): Promise<TradeResult> {
+  const { side, mint } = input;
+  
   if (vault.status !== "active") throw new TradeError(409, `vault is ${vault.status}`);
 
   // Live mark only — a fabricated price would fabricate pnl.
@@ -106,7 +118,7 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
   const priceSol = info.priceSol;
 
   const existing = await prisma.position.findUnique({
-    where: { vaultId_mint: { vaultId, mint } },
+    where: { vaultId_mint: { vaultId: vault.id, mint } },
   });
 
   // ── size the fill ────────────────────────────────────────────────
@@ -160,7 +172,7 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
           })
         : await tx.position.create({
             data: {
-              vaultId,
+              vaultId: vault.id,
               mint,
               symbol: info.symbol,
               name: info.name,
@@ -191,7 +203,7 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
 
     const tradeRow = await tx.trade.create({
       data: {
-        vaultId,
+        vaultId: vault.id,
         ts: now,
         side,
         mint,
@@ -213,7 +225,7 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
     // a clamp turns a trade that must fail into fabricated NAV.
     if (side === "buy") {
       const debited = await tx.vault.updateMany({
-        where: { id: vaultId, solBufferSol: { gte: solAmount } },
+        where: { id: vault.id, solBufferSol: { gte: solAmount } },
         data: { solBufferSol: { decrement: solAmount } },
       });
       if (debited.count === 0) {
@@ -221,24 +233,24 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
       }
     } else {
       await tx.vault.update({
-        where: { id: vaultId },
+        where: { id: vault.id },
         data: { solBufferSol: { increment: solAmount } },
       });
     }
 
     // re-read the post-debit truth, then derive tvl and NAV per share
     const fresh = await tx.vault.findUniqueOrThrow({
-      where: { id: vaultId },
+      where: { id: vault.id },
       select: { solBufferSol: true, totalShares: true },
     });
-    const agg = await tx.position.aggregate({ where: { vaultId }, _sum: { valueSol: true } });
+    const agg = await tx.position.aggregate({ where: { vaultId: vault.id }, _sum: { valueSol: true } });
     const solBufferSol = fresh.solBufferSol;
     const tvlSol = solBufferSol + (agg._sum.valueSol ?? 0);
     const sharePriceSol = fresh.totalShares > 0 ? tvlSol / fresh.totalShares : 1;
-    await tx.vault.update({ where: { id: vaultId }, data: { tvlSol, sharePriceSol } });
+    await tx.vault.update({ where: { id: vault.id }, data: { tvlSol, sharePriceSol } });
 
     const last = await tx.equityPoint.findFirst({
-      where: { vaultId },
+      where: { vaultId: vault.id },
       orderBy: { t: "desc" },
       select: { t: true },
     });
@@ -246,19 +258,175 @@ export async function executeTrade(vaultId: string, input: TradeInput): Promise<
       // equity curve records PER-SHARE value — flow-independent, so
       // deposits/withdrawals never masquerade as performance
       await tx.equityPoint.upsert({
-        where: { vaultId_t: { vaultId, t: now } },
+        where: { vaultId_t: { vaultId: vault.id, t: now } },
         update: { v: sharePriceSol },
-        create: { vaultId, t: now, v: sharePriceSol },
+        create: { vaultId: vault.id, t: now, v: sharePriceSol },
       });
     }
 
     return { tradeRow, positionRow: position };
   });
 
-  const assembled = await assembleVault(vaultId);
+  const assembled = await assembleVault(vault.id);
   return {
     trade: toTrade(tradeRow),
     position: positionRow ? toPosition(positionRow) : null,
+    vault: assembled!,
+  };
+}
+
+/**
+ * Execute a real trade (on-chain via Jupiter Router).
+ */
+async function executeRealTrade(vault: any, input: TradeInput): Promise<TradeResult> {
+  const { side, mint } = input;
+  
+  // For now, real vaults only support buys through the terminal
+  // Sells will require a different flow (withdrawals)
+  if (side === "sell") {
+    throw new TradeError(501, "Real vault sells not yet implemented - use withdrawals instead");
+  }
+
+  if (vault.status !== "active") {
+    throw new TradeError(409, `vault is ${vault.status}`);
+  }
+
+  const solAmount = Number(input.solAmount);
+  if (!Number.isFinite(solAmount) || solAmount <= 0) {
+    throw new TradeError(400, "solAmount must be a positive number");
+  }
+  
+  if (solAmount > vault.solBufferSol + EPS) {
+    throw new TradeError(
+      400,
+      `insufficient SOL buffer (requested ${solAmount}, available ${vault.solBufferSol.toFixed(4)})`,
+    );
+  }
+
+  // Get token info
+  const info = await getTokenInfo(mint);
+  if (info.source === "none") {
+    throw new TradeError(422, `no live price for ${mint}`);
+  }
+
+  // Validate the swap
+  const validation = await validateVaultSwap({
+    inputMint: new PublicKey("So11111111111111111111111111111111111111112"), // SOL
+    outputMint: new PublicKey(mint),
+    amountIn: BigInt(Math.round(solAmount * 1e9)),
+    vaultId: vault.id,
+  });
+
+  if (!validation.valid) {
+    throw new TradeError(400, validation.reason || "Swap validation failed");
+  }
+
+  // Execute the on-chain swap
+  const vaultPda = new PublicKey(vault.onchainVaultPda as string);
+  const result = await executeVaultSwap({
+    vaultId: vault.id,
+    vaultPda,
+    inputMint: new PublicKey("So11111111111111111111111111111111111111112"),
+    outputMint: new PublicKey(mint),
+    amountIn: BigInt(Math.round(solAmount * 1e9)),
+  });
+
+  // Record the trade in the database
+  const now = nowSec();
+  const tradeRow = await prisma.trade.create({
+    data: {
+      vaultId: vault.id,
+      ts: now,
+      side: "buy",
+      mint,
+      symbol: info.symbol,
+      solAmount,
+      tokenAmount: Number(result.outputAmount) / 1e9, // approximate
+      priceSol: solAmount / (Number(result.outputAmount) / 1e9),
+      txSig: result.signature,
+      source: "real",
+    },
+  });
+
+  // Update the vault's buffer and create/update position
+  const { trade: recordedTrade, position } = await prisma.$transaction(async (tx) => {
+    // Debit buffer
+    await tx.vault.update({
+      where: { id: vault.id },
+      data: { solBufferSol: { decrement: solAmount } },
+    });
+
+    // Create or update position
+    const existing = await tx.position.findUnique({
+      where: { vaultId_mint: { vaultId: vault.id, mint } },
+    });
+
+    const tokenAmount = Number(result.outputAmount) / 1e9;
+    let positionRow: any = null;
+
+    if (existing) {
+      positionRow = await tx.position.update({
+        where: { id: existing.id },
+        data: {
+          amountTokens: existing.amountTokens + tokenAmount,
+          costSol: existing.costSol + solAmount,
+          valueSol: (existing.amountTokens + tokenAmount) * (solAmount / tokenAmount),
+          markStale: false,
+        },
+      });
+    } else {
+      positionRow = await tx.position.create({
+        data: {
+          vaultId: vault.id,
+          mint,
+          symbol: info.symbol,
+          name: info.name,
+          amountTokens: tokenAmount,
+          costSol: solAmount,
+          valueSol: tokenAmount * (solAmount / tokenAmount),
+          markStale: false,
+        },
+      });
+    }
+
+    // Recalculate TVL and NAV
+    const fresh = await tx.vault.findUniqueOrThrow({
+      where: { id: vault.id },
+      select: { solBufferSol: true, totalShares: true },
+    });
+    const agg = await tx.position.aggregate({ 
+      where: { vaultId: vault.id }, 
+      _sum: { valueSol: true } 
+    });
+    const tvlSol = fresh.solBufferSol + (agg._sum.valueSol ?? 0);
+    const sharePriceSol = fresh.totalShares > 0 ? tvlSol / fresh.totalShares : 1;
+    
+    await tx.vault.update({ 
+      where: { id: vault.id }, 
+      data: { tvlSol, sharePriceSol } 
+    });
+
+    // Record equity point
+    const last = await tx.equityPoint.findFirst({
+      where: { vaultId: vault.id },
+      orderBy: { t: "desc" },
+      select: { t: true },
+    });
+    if (!last || now - last.t >= EQUITY_MIN_GAP_SEC) {
+      await tx.equityPoint.upsert({
+        where: { vaultId_t: { vaultId: vault.id, t: now } },
+        update: { v: sharePriceSol },
+        create: { vaultId: vault.id, t: now, v: sharePriceSol },
+      });
+    }
+
+    return { trade: toTrade(tradeRow), position: positionRow ? toPosition(positionRow) : null };
+  });
+
+  const assembled = await assembleVault(vault.id);
+  return {
+    trade: recordedTrade,
+    position,
     vault: assembled!,
   };
 }

@@ -28,6 +28,7 @@ model User {
   handle      String   @unique
   displayName String
   xHandle     String?
+  xVerified   Boolean  @default(false)
   avatarUrl   String?
   bio         String?
   // ── the user's SELF-CUSTODIAL Solana wallet (Privy embedded) ──────

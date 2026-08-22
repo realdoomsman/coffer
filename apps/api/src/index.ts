@@ -29,6 +29,8 @@ import { vaultsRouter } from "./routes/vaults.js";
 import { vestedRouter } from "./routes/vested.js";
 import { walletsRouter } from "./routes/wallets.js";
 import { withdrawalsRouter } from "./routes/withdrawals.js";
+import { leaderboardsRouter } from "./routes/leaderboards.js";
+import { xOAuthRouter } from "./routes/xOAuth.js";
 import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
 import { startNavKeeper, stopNavKeeper } from "./services/navKeeper.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
@@ -56,6 +58,8 @@ app.use("/api/withdrawals", withdrawalsRouter);
 app.use("/api/vested", vestedRouter);
 app.use("/api/meta", metaRouter);
 app.use("/api/onchain", onchainRouter);
+app.use("/api/leaderboards", leaderboardsRouter);
+app.use("/api/auth", xOAuthRouter);
 
 // ── production: this process also serves the built web app ─────────
 // Railway runs Coffer as ONE service — the API and the Vite build come

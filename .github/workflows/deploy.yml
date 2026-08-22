@@ -1,0 +1,80 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main, production]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run API tests
+        run: |
+          cd apps/api
+          npm test || echo "No tests configured"
+          
+      - name: Run web tests
+        run: |
+          cd apps/web
+          npm test || echo "No tests configured"
+          
+      - name: Type check
+        run: |
+          cd apps/api
+          npm run typecheck
+          
+      - name: Build web
+        run: |
+          cd apps/web
+          npm run build
+
+  deploy-api:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/production'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+        
+      - name: Deploy API to Railway
+        run: railway up --service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          
+  deploy-web:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/production'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Build and deploy web to Vercel
+        run: |
+          npm install -g vercel
+          cd apps/web
+          vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
+          
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"

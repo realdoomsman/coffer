@@ -1,0 +1,41 @@
+1/n
+How Coffer prevents trader exit scams — the program design.
+
+Other copy-trade platforms: trader controls the wallet → they can rug.
+
+Coffer: the vault program owns custody. Traders get scoped execute_swap instructions ONLY.
+
+Here's how it works:
+
+2/n
+When you deposit, the vault program creates a program-owned PDA (Program Derived Address).
+
+This PDA holds the SOL and tokens. Only the vault program can sign for withdrawals.
+
+Traders submit trades to the program, which executes them via Jupiter Router.
+
+3/n
+The execute_swap instruction is scoped:
+- Can only call approved Jupiter routes
+- Can only move tokens within the vault
+- Cannot send funds to external addresses
+
+The trader's private key never signs a transfer. Only the program does.
+
+4/n
+If a trader wants to withdraw their performance fee:
+- They must wait 60 days (vesting period)
+- Their fee is routed to a platform-controlled escrow
+- They claim it via a separate on-chain instruction
+
+They cannot rug the vault. The code literally doesn't allow it.
+
+5/n
+Verification: all vaults, trades, and withdrawals are on-chain.
+
+Check the devnet program yourself:
+https://explorer.solana.com/address/8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U?cluster=devnet
+
+Read the source: github.com/coffer-fun/vault
+
+Trust code, not promises.

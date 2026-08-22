@@ -1,0 +1,11 @@
+NEW: Live terminal trading
+
+Real SOL, real execution, via Jupiter Router.
+
+1-second charts from Birdeye. Position-based limit orders. Gas receipts.
+
+devnet now → mainnet after audit.
+
+See it in action: [screenshot coming]
+
+coffer.fun/terminal
