@@ -12,13 +12,17 @@
     "dev:api": "npm run dev -w apps/api",
     "dev:web": "npm run dev -w apps/web",
     "db:setup": "npm run db:push -w apps/api && npm run db:seed -w apps/api",
-    "build": "npm run build -w packages/shared --if-present && npm run build -w apps/api --if-present && npm run build -w apps/web",
+    "build": "npm run build -w packages/shared --if-present && node scripts/prisma-prod.mjs generate && npm run build -w apps/api --if-present && npm run build -w apps/web",
+    "start": "node scripts/prisma-prod.mjs push && tsx apps/api/src/index.ts",
+    "prisma:prod:emit": "node scripts/prisma-prod.mjs emit",
+    "prisma:prod:validate": "node scripts/prisma-prod.mjs validate",
+    "db:generate:dev": "npm run db:generate -w apps/api",
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   }
 }

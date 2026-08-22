@@ -23,16 +23,25 @@ pub const TREASURY_SEED: &[u8] = b"treasury";
 // ---------------------------------------------------------------------------
 // Pinned external programs / mints
 // ---------------------------------------------------------------------------
-// NOTE(api): `pubkey!` is re-exported by solana-program at its crate root and
-// is reachable through anchor_lang's re-export. If a future anchor bump breaks
-// this path, replace with `Pubkey::from_str_const(..)` (solana >= 2.0) or a
-// `const` built via `Pubkey::new_from_array`.
+// Resolved at first build: neither `anchor_lang::solana_program::pubkey!`
+// nor `Pubkey::from_str_const` (solana >= 2.0) is reachable on this stack
+// (anchor 0.30.1 / solana-program 1.18.26), so these are const byte arrays
+// decoded from the base58 shown beside each. Version-independent, and the
+// tests assert they round-trip back to these exact addresses.
 /// Jupiter Aggregator v6. execute_swap refuses to CPI anywhere else.
-pub const JUPITER_V6_PROGRAM_ID: Pubkey =
-    anchor_lang::solana_program::pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+pub const JUPITER_V6_PROGRAM_ID: Pubkey = Pubkey::new_from_array([
+        4, 121, 213, 91, 242, 49, 192, 110,
+        238, 116, 197, 110, 206, 104, 21, 7,
+        253, 177, 178, 222, 163, 244, 142, 81,
+        2, 177, 205, 162, 86, 188, 19, 143,
+]); // JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
 /// Native (wrapped) SOL mint.
-pub const WSOL_MINT: Pubkey =
-    anchor_lang::solana_program::pubkey!("So11111111111111111111111111111111111111112");
+pub const WSOL_MINT: Pubkey = Pubkey::new_from_array([
+        6, 155, 136, 87, 254, 171, 129, 132,
+        251, 104, 127, 99, 70, 24, 192, 53,
+        218, 196, 57, 220, 26, 235, 59, 85,
+        152, 160, 240, 0, 0, 0, 0, 1,
+]); // So11111111111111111111111111111111111111112
 
 // ---------------------------------------------------------------------------
 // Economic constants

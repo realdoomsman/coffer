@@ -1,5 +1,8 @@
 // ── Coffer API server ──────────────────────────────────────────────
 import "./env.js"; // load .env files before anything reads process.env
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express, {
   type NextFunction,
@@ -46,6 +49,44 @@ app.use("/api/activity", activityRouter);
 app.use("/api/pooltrades", poolTradesRouter);
 app.use("/api/withdrawals", withdrawalsRouter);
 app.use("/api/meta", metaRouter);
+
+// ── production: this process also serves the built web app ─────────
+// Railway runs Coffer as ONE service — the API and the Vite build come
+// off the same origin, so no CORS, no second deploy, no /api rewrite.
+// Off in dev (env.serveStatic is false), where the Vite dev server owns
+// the front end and proxies /api here: dev behaviour is unchanged.
+//
+// Mounted *after* every /api router and *before* the JSON 404, so the
+// API surface is untouched and unknown /api paths still get JSON.
+if (env.serveStatic) {
+  const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+  const INDEX_HTML = join(WEB_DIST, "index.html");
+
+  if (existsSync(INDEX_HTML)) {
+    // Vite emits content-hashed asset filenames → cache them hard.
+    // index.html is served by hand below so it never goes stale.
+    app.use(express.static(WEB_DIST, { index: false, maxAge: "1y" }));
+
+    // SPA catch-all: every non-/api GET is a client-side route
+    // (/explore, /vault/:id, /portfolio …). Hand back index.html so a
+    // refresh or a pasted deep link renders instead of 404ing.
+    // /api/* is excluded and falls through to the JSON 404 below.
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
+      if (req.path === "/api" || req.path.startsWith("/api/")) return next();
+      res.setHeader("Cache-Control", "no-cache");
+      res.sendFile(INDEX_HTML, (err) => {
+        if (err) next(err);
+      });
+    });
+    console.log(`[api] serving web build from ${WEB_DIST}`);
+  } else {
+    console.warn(
+      `[api] SERVE_STATIC/production is on but no web build at ${WEB_DIST} — ` +
+        "run `npm run build` at the repo root. Serving API only.",
+    );
+  }
+}
 
 // 404 — JSON, always
 app.use((_req: Request, res: Response) => {
@@ -102,8 +143,10 @@ const ROUTES: Array<[string, string]> = [
   ["GET ", "/api/security/:mint"],
 ];
 
-const server = app.listen(env.port, () => {
-  console.log(`[api] coffer api listening on http://localhost:${env.port}`);
+// Bind 0.0.0.0 (env.host): a container listening on 127.0.0.1 is
+// invisible to Railway's router and fails the /api/health check.
+const server = app.listen(env.port, env.host, () => {
+  console.log(`[api] coffer api listening on http://${env.host}:${env.port}`);
   console.log(`[api] db: ${env.databaseUrl}`);
   for (const [method, path] of ROUTES) console.log(`  ${method} ${path}`);
   // Trigger engine + live revaluation + mirror sync only run alongside

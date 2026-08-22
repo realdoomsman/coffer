@@ -42,6 +42,12 @@ function parseEnvFile(path: string): Record<string, string> {
   return out;
 }
 
+// Railway (and every other PaaS) injects PORT into the real environment
+// and requires the process to bind exactly that port. Captured *before*
+// the .env merge below so a stray PORT in a checked-out .env can never
+// shadow the platform's — binding the wrong port fails the deploy.
+const PLATFORM_PORT = process.env.PORT;
+
 const fileEnv: Record<string, string> = {
   ...parseEnvFile(resolve(REPO_ROOT, ".env")), // root first (lowest)
   ...parseEnvFile(resolve(API_DIR, ".env")), // app overrides root
@@ -71,8 +77,33 @@ export const env = {
   get databaseUrl(): string {
     return str("DATABASE_URL", "file:./dev.db");
   },
+  /**
+   * Listen port. The platform-injected PORT (Railway) always wins; a
+   * PORT in a local .env is the next fallback; 8787 is the local default
+   * the Vite dev proxy expects.
+   */
   get port(): number {
+    const platform = Number.parseInt(PLATFORM_PORT ?? "", 10);
+    if (Number.isFinite(platform) && platform > 0) return platform;
     return int("PORT", 8787);
+  },
+  /**
+   * Bind address. 0.0.0.0 — a container that binds 127.0.0.1 is
+   * unreachable from Railway's router and fails its healthcheck.
+   */
+  get host(): string {
+    return str("HOST", "0.0.0.0");
+  },
+  /**
+   * Production single-service mode: this process also serves the built
+   * web app (apps/web/dist). On when NODE_ENV=production, or forced
+   * either way with SERVE_STATIC=1 / SERVE_STATIC=0. Dev leaves it off,
+   * so the Vite dev server keeps ownership of the front end.
+   */
+  get serveStatic(): boolean {
+    const flag = str("SERVE_STATIC");
+    if (flag) return !/^(0|false|no|off)$/i.test(flag);
+    return str("NODE_ENV") === "production";
   },
   /** Jupiter Price v3 — keyless works at low rate; key raises limits. */
   get jupiterApiKey(): string | undefined {

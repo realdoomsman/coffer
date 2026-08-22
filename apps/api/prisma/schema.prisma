@@ -1,13 +1,17 @@
 // ── Coffer database schema ─────────────────────────────────────────
-// Dev provider is SQLite for zero-setup local runs. The schema is kept
-// Postgres-portable on purpose: scalar types only (String/Int/Float/
-// Boolean/DateTime), no SQLite-specific attributes, no enums (SQLite
-// has none — we validate enum-ish strings at the API boundary instead).
+// THIS IS THE DEV SCHEMA. Production runs POSTGRES; SQLite below is
+// dev-only, chosen so a fresh clone runs with zero setup. The schema is
+// kept Postgres-portable on purpose: scalar types only (String/Int/
+// Float/Boolean/DateTime), no SQLite-specific attributes, no enums
+// (SQLite has none — enum-ish strings are validated at the API edge).
 //
-// Postgres swap: change `provider` below to "postgresql" and set
-// DATABASE_URL="postgresql://user:pass@host:5432/coffer", then run
-// `prisma db push` (or start a real migration history with
-// `prisma migrate dev`). Nothing else in this file needs to change.
+// Production does NOT edit this file. `scripts/prisma-prod.mjs` emits
+// apps/api/prisma/schema.prod.prisma — this file with the datasource
+// provider swapped to "postgresql" — and the build/start path targets
+// it with `--schema` (see the root `build` and `start` scripts). So:
+//   local dev   → this file, provider sqlite,     DATABASE_URL=file:./dev.db
+//   Railway/prod→ schema.prod.prisma, postgresql, DATABASE_URL=postgresql://…
+// Edit models here only; the prod twin is regenerated on every build.
 
 generator client {
   provider = "prisma-client-js"

@@ -54,7 +54,7 @@ use instructions::*;
 // Placeholder id (the standard Anchor template key). After the first
 // `anchor build`, run `anchor keys sync` to stamp the real program id here
 // and in Anchor.toml.
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U");
 
 #[program]
 pub mod vault {

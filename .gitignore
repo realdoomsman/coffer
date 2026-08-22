@@ -6,6 +6,8 @@ build/
 *.local
 apps/api/prisma/dev.db
 apps/api/prisma/dev.db-journal
+# generated on every build by scripts/prisma-prod.mjs — never hand-edited
+apps/api/prisma/schema.prod.prisma
 .DS_Store
 target/
 .anchor/
