@@ -8,16 +8,62 @@ export default defineConfig({
   // never load.
   envDir: "../../",
   build: {
-    rollupOptions: {
-      output: {
-        // separate cacheable vendor chunks: the chart and auth stacks are
-        // big and change far less often than app code
-        manualChunks: {
-          react: ["react", "react-dom", "react-router-dom"],
-          charts: ["lightweight-charts"],
-        },
+    // Enable minification
+    minify: "terser",
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
       },
     },
+    rollupOptions: {
+      output: {
+        // Separate cacheable vendor chunks: the chart and auth stacks are
+        // big and change far less often than app code
+        manualChunks: (id) => {
+          if (id.includes("node_modules")) {
+            // React ecosystem
+            if (id.includes("react") || id.includes("react-dom") || id.includes("react-router")) {
+              return "react";
+            }
+            // Charts
+            if (id.includes("lightweight-charts")) {
+              return "charts";
+            }
+            // Solana
+            if (id.includes("@solana") || id.includes("buffer")) {
+              return "solana";
+            }
+            // Auth
+            if (id.includes("@privy")) {
+              return "auth";
+            }
+            // QR codes
+            if (id.includes("qrcode")) {
+              return "qrcode";
+            }
+            // Other vendor code
+            return "vendor";
+          }
+        },
+        // Chunk file naming with content hash for long-term caching
+        chunkFileNames: "assets/js/[name]-[hash].js",
+        entryFileNames: "assets/js/[name]-[hash].js",
+        assetFileNames: "assets/[ext]/[name]-[hash].[ext]",
+      },
+    },
+    // Optimize chunk size warnings
+    chunkSizeWarningLimit: 1000,
+    // Target modern browsers
+    target: "esnext",
+  },
+  // Optimize dependencies
+  optimizeDeps: {
+    include: [
+      "react",
+      "react-dom",
+      "react-router-dom",
+    ],
   },
   server: {
     port: 5173,
@@ -27,5 +73,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  // Development server performance
+  esbuild: {
+    logOverride: { "this-is-undefined-in-esm": "silent" },
   },
 });

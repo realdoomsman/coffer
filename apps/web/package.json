@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "analyze": "vite-bundle-visualizer",
+    "build:analyze": "tsc --noEmit && vite build --mode production && npx vite-bundle-visualizer"
   },
   "dependencies": {
     "@coffer/shared": "*",
@@ -30,6 +32,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vite-bundle-visualizer": "^1.0.0"
   }
 }

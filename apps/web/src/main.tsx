@@ -9,6 +9,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 import "./theme.css";
+import "./styles/animations.css";
 import App from "./App";
 import { AuthProvider } from "./lib/auth";
 import { ToastProvider } from "./lib/toast";

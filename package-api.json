@@ -1,0 +1,14 @@
+{
+  "name": "coffer-api",
+  "version": "0.1.0",
+  "description": "Coffer vault API for Railway deployment",
+  "main": "apps/api/src/index.ts",
+  "scripts": {
+    "start": "node --import tsx apps/api/src/index.ts",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}

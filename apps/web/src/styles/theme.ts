@@ -1,5 +1,5 @@
-// ── Coffer Design System ───────────────────────────────────────────
-// Modern dark theme with professional styling and animations
+// ── Enhanced Theme System with Professional Animations ──────────────
+// Modern dark theme integrated with animation system for Coffer UI
 
 // Color Palette - Dark Theme
 export const colors = {
@@ -108,7 +108,7 @@ export const borderRadius = {
   full: '9999px',
 };
 
-// Shadows
+// Shadows with animation support
 export const shadows = {
   sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
   md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
@@ -117,83 +117,60 @@ export const shadows = {
   glow: '0 0 20px rgba(14, 165, 233, 0.3)',
   glowSuccess: '0 0 20px rgba(16, 185, 129, 0.3)',
   glowError: '0 0 20px rgba(239, 68, 68, 0.3)',
+  glowAmber: '0 0 20px rgba(245, 158, 11, 0.3)',
+  glowPurple: '0 0 20px rgba(168, 85, 247, 0.3)',
 };
 
-// Animations
+// Animation configurations
 export const animations = {
-  // Fade in
-  fadeIn: 'fadeIn 0.2s ease-in-out',
-  fadeInUp: 'fadeInUp 0.3s ease-out',
-  fadeInDown: 'fadeInDown 0.3s ease-out',
-  
-  // Slide
-  slideIn: 'slideIn 0.3s ease-out',
-  slideOut: 'slideOut 0.3s ease-in',
-  
-  // Scale
-  scaleIn: 'scaleIn 0.2s ease-out',
-  scaleOut: 'scaleOut 0.2s ease-in',
-  
-  // Pulse
-  pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-  
-  // Shimmer
-  shimmer: 'shimmer 1.5s infinite',
-  
-  // Bounce
-  bounce: 'bounce 1s infinite',
-};
-
-// Animation keyframes
-export const keyframes = {
-  fadeIn: `
-    from { opacity: 0; }
-    to { opacity: 1; }
-  `,
-  fadeInUp: `
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  `,
-  fadeInDown: `
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-  `,
-  slideIn: `
-    from { transform: translateX(-10px); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-  `,
-  slideOut: `
-    from { transform: translateX(0); opacity: 1; }
-    to { transform: translateX(-10px); opacity: 0; }
-  `,
-  scaleIn: `
-    from { transform: scale(0.95); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
-  `,
-  scaleOut: `
-    from { transform: scale(1); opacity: 1; }
-    to { transform: scale(0.95); opacity: 0; }
-  `,
-  pulse: `
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  `,
-  shimmer: `
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  `,
-  bounce: `
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
-  `,
+  durations: {
+    instant: '100ms',
+    fast: '150ms',
+    normal: '200ms',
+    slow: '300ms',
+    slower: '400ms',
+    slowerStill: '500ms',
+  },
+  easings: {
+    linear: 'linear',
+    ease: 'ease',
+    easeIn: 'ease-in',
+    easeOut: 'ease-out',
+    easeInOut: 'ease-in-out',
+    spring: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+    springGentle: 'cubic-bezier(0.25, 0.1, 0.25, 1)',
+    snap: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    smooth: 'cubic-bezier(0.4, 0, 0.6, 1)',
+    dramatic: 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+    professional: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  },
+  keyframes: {
+    fadeIn: 'fadeIn 0.2s ease-in-out',
+    fadeInUp: 'fadeInUp 0.3s ease-out',
+    fadeInDown: 'fadeInDown 0.3s ease-out',
+    fadeInLeft: 'fadeInLeft 0.3s ease-out',
+    fadeInRight: 'fadeInRight 0.3s ease-out',
+    slideIn: 'slideIn 0.3s ease-out',
+    slideOut: 'slideOut 0.3s ease-in',
+    scaleIn: 'scaleIn 0.2s ease-out',
+    scaleOut: 'scaleOut 0.2s ease-in',
+    pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+    shimmer: 'shimmer 1.5s infinite',
+    bounce: 'bounce 1s infinite',
+    glowPulse: 'glowPulse 2s ease-in-out infinite',
+    statusActive: 'statusActive 2s ease-in-out infinite',
+    statusWarning: 'statusWarning 1.5s ease-in-out infinite',
+  },
 };
 
 // Transitions
 export const transitions = {
-  fast: '0.1s ease-in-out',
-  normal: '0.2s ease-in-out',
-  slow: '0.3s ease-in-out',
-  bounce: '0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+  fast: '100ms ease-in-out',
+  normal: '200ms ease-in-out',
+  slow: '300ms ease-in-out',
+  bounce: '500ms cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+  professional: '300ms cubic-bezier(0.16, 1, 0.3, 1)',
+  spring: '400ms cubic-bezier(0.175, 0.885, 0.32, 1.275)',
 };
 
 // Z-index scale
@@ -205,6 +182,9 @@ export const zIndex = {
   modal: 50,
   popover: 60,
   tooltip: 70,
+  toast: 80,
+  drawer: 90,
+  overlay: 100,
 };
 
 // Breakpoints
@@ -216,6 +196,109 @@ export const breakpoints = {
   '2xl': '1536px',
 };
 
+// Animation variants for components
+export const animationVariants = {
+  // Card animations
+  card: {
+    enter: 'animate-in fade-in slide-in-from-bottom-4 duration-500',
+    hover: 'hover:scale-105 hover:-translate-y-1 hover:shadow-xl',
+    active: 'active:scale-95 active:translate-y-0',
+  },
+  
+  // List item animations
+  listItem: {
+    enter: 'animate-in fade-in slide-in-from-left-2 duration-300',
+    hover: 'hover:bg-blue-500/5',
+  },
+  
+  // Button animations
+  button: {
+    enter: 'animate-in fade-in duration-200',
+    hover: 'hover:scale-105 hover:-translate-y-0.5',
+    active: 'active:scale-95 active:translate-y-0',
+    focus: 'focus:ring-2 focus:ring-blue-500/50',
+  },
+  
+  // Modal animations
+  modal: {
+    backdrop: 'animate-in fade-in duration-200',
+    content: 'animate-in zoom-in-95 duration-200',
+  },
+  
+  // Dropdown animations
+  dropdown: {
+    enter: 'animate-in fade-in slide-in-from-top-2 duration-200',
+    exit: 'animate-out fade-out slide-out-to-top-2 duration-150',
+  },
+  
+  // Tooltip animations
+  tooltip: {
+    enter: 'animate-in fade-in zoom-in-95 duration-150',
+    exit: 'animate-out fade-out zoom-out-95 duration-150',
+  },
+  
+  // Status indicator animations
+  status: {
+    active: 'animate-pulse',
+    warning: 'animate-pulse',
+    loading: 'animate-spin',
+  },
+  
+  // Table row animations
+  tableRow: {
+    enter: 'animate-in fade-in slide-in-from-left-2 duration-300',
+    hover: 'hover:bg-blue-500/5 hover:scale-[1.01]',
+  },
+  
+  // Badge animations
+  badge: {
+    enter: 'animate-in fade-in scale-in duration-200',
+    hover: 'hover:scale-110',
+    pulse: 'animate-pulse',
+  },
+  
+  // Progress bar animations
+  progressBar: {
+    enter: 'animate-in fade-in slide-in-from-left duration-300',
+    pulse: 'animate-pulse',
+  },
+  
+  // Notification animations
+  notification: {
+    enter: 'animate-in slide-in-from-right duration-300',
+    exit: 'animate-out slide-out-to-right duration-200',
+  },
+  
+  // Skeleton loading animations
+  skeleton: {
+    shimmer: 'animate-shimmer',
+    pulse: 'animate-pulse',
+  },
+};
+
+// Stagger animation delays
+export const staggerDelays = {
+  fast: [0, 50, 100, 150, 200, 250, 300, 350, 400, 450],
+  normal: [0, 75, 150, 225, 300, 375, 450, 525, 600, 675],
+  slow: [0, 100, 200, 300, 400, 500, 600, 700, 800, 900],
+};
+
+// Responsive animation adjustments
+export const responsiveAnimations = {
+  mobile: {
+    duration: '150ms',
+    easing: 'ease-out',
+  },
+  tablet: {
+    duration: '200ms',
+    easing: 'ease-out',
+  },
+  desktop: {
+    duration: '300ms',
+    easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  },
+};
+
 // Export theme object
 export const theme = {
   colors,
@@ -224,10 +307,12 @@ export const theme = {
   borderRadius,
   shadows,
   animations,
-  keyframes,
   transitions,
   zIndex,
   breakpoints,
+  animationVariants,
+  staggerDelays,
+  responsiveAnimations,
 };
 
 // CSS utility functions
@@ -267,9 +352,10 @@ export const css = {
   
   // Animation utilities
   animate: {
-    fadeIn: `animation: ${keyframes.fadeIn} 0.2s ease-in-out;`,
-    slideIn: `animation: ${keyframes.slideIn} 0.3s ease-out;`,
-    pulse: `animation: ${keyframes.pulse} 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;`,
+    fadeIn: `animation: fadeIn 0.2s ease-in-out;`,
+    slideIn: `animation: slideIn 0.3s ease-out;`,
+    pulse: `animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;`,
+    spring: `animation: scaleIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);`,
   },
   
   // Responsive utilities
@@ -277,6 +363,30 @@ export const css = {
     mobile: '@media (max-width: 768px)',
     desktop: '@media (min-width: 769px)',
   },
+};
+
+// Animation presets for quick use
+export const animationPresets = {
+  // Quick animations
+  fadeIn: 'animate-in fade-in duration-200',
+  fadeInUp: 'animate-in fade-in slide-in-from-bottom-4 duration-300',
+  fadeInDown: 'animate-in fade-in slide-in-from-top-4 duration-300',
+  scaleIn: 'animate-in zoom-in-95 duration-200',
+  slideIn: 'animate-in slide-in-from-left-4 duration-300',
+  
+  // Hover effects
+  hoverScale: 'hover:scale-105 transition-transform duration-200',
+  hoverLift: 'hover:-translate-y-1 transition-transform duration-200',
+  hoverGlow: 'hover:shadow-lg transition-shadow duration-200',
+  
+  // Status effects
+  pulse: 'animate-pulse',
+  spin: 'animate-spin',
+  bounce: 'animate-bounce',
+  
+  // Interactive
+  click: 'active:scale-95 transition-transform duration-100',
+  focus: 'focus:ring-2 focus:ring-blue-500/50 transition-all duration-200',
 };
 
 export default theme;

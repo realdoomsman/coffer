@@ -10,6 +10,7 @@ import express, {
   type Response,
 } from "express";
 import { env } from "./env.js";
+import { requestTiming } from "./performance.js";
 import { activityRouter } from "./routes/activity.js";
 import { dcaRouter } from "./routes/dca.js";
 import { healthRouter } from "./routes/health.js";
@@ -36,6 +37,7 @@ import { startNavKeeper, stopNavKeeper } from "./services/navKeeper.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
 
 const app = express();
+app.use(requestTiming); // Track slow requests
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
 
