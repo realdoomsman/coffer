@@ -167,10 +167,17 @@ const num = (v: unknown): number => {
  * bonding-curve and graduated tokens alike. Returns [] on any failure so
  * the caller can fall through — never throws.
  */
-async function pumpCandles(mint: string, tf: Timeframe, limit: number): Promise<Candle[]> {
+export type Denom = "USD" | "SOL";
+
+async function pumpCandles(
+  mint: string,
+  tf: Timeframe,
+  limit: number,
+  currency: Denom,
+): Promise<Candle[]> {
   try {
     const res = await fetch(
-      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=${limit}&currency=USD`,
+      `${PUMP_CANDLES_BASE}/${encodeURIComponent(mint)}/candles?interval=${PUMP_TF[tf]}&limit=${limit}&currency=${currency}`,
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
     );
     if (!res.ok) return [];
@@ -286,20 +293,27 @@ function mergeWindow(key: string, tail: Candle[], cap: number): Candle[] {
  */
 const inFlight = new Map<string, Promise<OhlcvResult>>();
 
-export function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult> {
-  const key = `ohlcv:${mint}:${tf}`;
+export function getOhlcv(mint: string, tf: Timeframe, currency: Denom = "USD"): Promise<OhlcvResult> {
+  // currency is part of the key — a SOL chart and a USD chart of the same
+  // token are different series and must never share a cache entry
+  const key = `ohlcv:${mint}:${tf}:${currency}`;
   const cached = cacheGet<OhlcvResult>(key);
   if (cached !== undefined) return Promise.resolve(cached);
 
   const hit = inFlight.get(key);
   if (hit) return hit;
 
-  const p = loadOhlcv(mint, tf, key).finally(() => inFlight.delete(key));
+  const p = loadOhlcv(mint, tf, key, currency).finally(() => inFlight.delete(key));
   inFlight.set(key, p);
   return p;
 }
 
-async function loadOhlcv(mint: string, tf: Timeframe, key: string): Promise<OhlcvResult> {
+async function loadOhlcv(
+  mint: string,
+  tf: Timeframe,
+  key: string,
+  currency: Denom,
+): Promise<OhlcvResult> {
 
   const good = recallGood<OhlcvResult>(key);
 
@@ -307,7 +321,7 @@ async function loadOhlcv(mint: string, tf: Timeframe, key: string): Promise<Ohlc
   // Cold key pulls the full window; a warm one pulls only a tail and merges.
   const warm = (retained.get(key)?.length ?? 0) > 0;
   const want = warm ? PUMP_TAIL[tf] : PUMP_LIMIT[tf];
-  const pump = await pumpCandles(mint, tf, want);
+  const pump = await pumpCandles(mint, tf, want, currency);
   if (pump.length > 0) {
     const merged = mergeWindow(key, pump, PUMP_LIMIT[tf]);
     const fresh: OhlcvResult = {
@@ -328,6 +342,15 @@ async function loadOhlcv(mint: string, tf: Timeframe, key: string): Promise<Ohlc
   // denial of service against our own GT budget. With a remembered chart
   // in hand we serve that instead (step 3) and let the next poll retry
   // pump.fun.
+  // GeckoTerminal quotes in USD only. Falling back for a SOL request would
+  // return numbers ~500x off with no way for the client to tell.
+  if (currency === "SOL") {
+    if (good) {
+      return cacheSet(key, { ...good.value, stale: true, fetchedAt: good.at }, failTtl(tf));
+    }
+    return cacheSet(key, { candles: [], pool: null }, failTtl(tf));
+  }
+
   const subMinute = TF_MS[tf] < 60_000;
   if (subMinute && good) {
     return cacheSet(

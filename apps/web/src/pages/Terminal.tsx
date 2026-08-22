@@ -53,6 +53,24 @@ const TF_SECONDS: Record<Tf, number> = {
   "1h": 3_600,
 };
 
+/**
+ * What each MEV mode costs you. A protection setting whose tradeoff is
+ * unstated is worse than no setting — people pick "secure" and then blame
+ * the terminal for being slow.
+ */
+function mevHint(mode: string): string {
+  switch (mode) {
+    case "off":
+      return "off — broadcast normally. Fastest, and sandwichable.";
+    case "reduced":
+      return "reduced — some protection, small latency cost.";
+    case "secure":
+      return "secure — routed to protect against sandwiching. Slowest, and can miss fast moves.";
+    default:
+      return mode;
+  }
+}
+
 const CANDLE_POLL_MS: Record<Tf, number> = {
   // Upstream sits 2-7s behind wall clock even on a busy token, so polling
   // a 1s chart faster than ~1.2s only spends rate limit.
@@ -265,6 +283,12 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     });
   }, [tf]);
 
+  /**
+   * Chart quote currency. The vault holds SOL and its PnL is booked in SOL,
+   * so on a USD chart a position can look green purely because SOL rallied.
+   */
+  const [quote, setQuote] = useState<"USD" | "SOL">("USD");
+
   const [candleVer, setCandleVer] = useState(0);
   /** Chart subject last auto-framed — see the fit guard below. */
   const fitKey = useRef<string>("");
@@ -295,7 +319,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       // delta is a couple hundred bytes
       const since = held.length > 0 ? held[held.length - 1]!.t : undefined;
       return api
-        .ohlcv(mint, tf, since)
+        .ohlcv(mint, tf, since, quote)
         .then((r) => {
           if (!alive) return;
           setPool(r.pool);
@@ -346,14 +370,16 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       clearInterval(iv);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [mint, tf]);
+  }, [mint, tf, quote]);
 
   // render pipeline: raw candles × denomination scale + vault trade markers
   useEffect(() => {
     const series = seriesApi.current;
     const chart = chartApi.current;
     if (!series || !chart) return;
-    const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
+    // MCap is supply x USD price. On a SOL-quoted chart that product is not
+    // a market cap, so the denomination toggle only applies in USD.
+    const mcapMode = denom === "mcap" && quote === "USD" && supplyUi !== null && supplyUi > 0;
     const scale = mcapMode ? supplyUi : 1;
     series.applyOptions({
       priceFormat: mcapMode
@@ -397,7 +423,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       fitKey.current = subject;
       chart.timeScale().fitContent();
     }
-  }, [candleVer, denom, supplyUi, vaultTrades, mint, tf, layers, poolTape, trackedSet]);
+  }, [candleVer, denom, quote, supplyUi, vaultTrades, mint, tf, layers, poolTape, trackedSet]);
 
   // detect order fills → toast
   const prevOrders = useRef<Map<string, string>>(new Map());
@@ -429,11 +455,20 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     }
     const held = positions.find((p) => p.mint === mint) ?? null;
     if (!layers.avgEntry || !held) return;
-    const entry = avgEntryUsd(held, solUsd);
+    // avgEntryUsd is, as named, in USD. Drawing it on a SOL-quoted chart
+    // would put the line about 500x off. Cost basis in SOL per token is
+    // exactly costSol/amountTokens, so quote it directly instead.
+    const entry =
+      quote === "SOL"
+        ? held.amountTokens > 0 && held.costSol > 0
+          ? held.costSol / held.amountTokens
+          : null
+        : avgEntryUsd(held, solUsd);
     if (entry === null) return;
     const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
     const scale = mcapMode ? supplyUi : 1;
-    const live = marks.get(mint)?.priceUsd;
+    const m = marks.get(mint);
+    const live = quote === "SOL" ? m?.priceSol : m?.priceUsd;
     const pct = live && entry > 0 ? ((live - entry) / entry) * 100 : null;
     avgLine.current = series.createPriceLine({
       price: entry * scale,
@@ -443,7 +478,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       axisLabelVisible: true,
       title: pct === null ? "avg entry" : `avg entry ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
     });
-  }, [positions, mint, layers.avgEntry, denom, supplyUi, marks, solUsd]);
+  }, [positions, mint, layers.avgEntry, denom, quote, supplyUi, marks, solUsd]);
 
   // ── the forming candle ───────────────────────────────────────────
   // Upstream only hands back whole bars, so between refreshes the right
@@ -458,6 +493,8 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     const bars = rawCandles.current;
     const last = bars[bars.length - 1];
     if (!last) return; // nothing charted yet — wait for the first fetch
+    // the mark used below is priceUsd; on a SOL chart it is the wrong unit
+    if (quote !== "USD") return;
 
     const width = TF_SECONDS[tf];
     // Sub-minute charts do NOT get a synthetic bar.
@@ -494,7 +531,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       low: bar.l * scale,
       close: bar.c * scale,
     });
-  }, [marks, mint, tf, denom, supplyUi]);
+  }, [marks, mint, tf, denom, quote, supplyUi]);
 
   // ── trade feed ───────────────────────────────────────────────────
   // One tape, three lenses. "You" is the honest one: paper fills are
@@ -745,6 +782,18 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                   onClick={() => setDenom("mcap")}
                 >
                   MCap
+                </button>
+              </div>
+              <div className="viewtoggle" title="Chart quote currency">
+                <button className={quote === "USD" ? "on" : ""} onClick={() => setQuote("USD")}>
+                  USD
+                </button>
+                <button
+                  className={quote === "SOL" ? "on" : ""}
+                  title="The vault books PnL in SOL — a USD chart moves when SOL moves"
+                  onClick={() => setQuote("SOL")}
+                >
+                  SOL
                 </button>
               </div>
               <div className="chipsrow">
@@ -1174,9 +1223,16 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
             <div className="gasline" aria-label="Execution settings">
               <span title="Priority fee">⛽ {prio}</span>
               <span title="Slippage">〜 {slippage}%</span>
-              <span title="MEV protection">🛡 {mev}</span>
+              <span title={mevHint(mev)}>🛡 {mev}</span>
+              {/* These are stored, not applied. The trade service takes only
+                  {side, mint, solAmount, sellFraction} — nothing in the fill
+                  path reads slippage, priority or MEV mode. Saying otherwise
+                  dresses a mock up as a ticket. */}
+              <span className="neg" title="Saved for when real execution lands. The paper fill path does not read them.">
+                not applied
+              </span>
               <span
-                title="Change via presets — applied on-chain in P1"
+                title="Change via presets"
                 onClick={() => applyPreset(active)}
                 style={{ cursor: "pointer", color: "var(--amber)" }}
               >

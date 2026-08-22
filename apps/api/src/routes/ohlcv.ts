@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getOhlcv, isTimeframe, TIMEFRAMES } from "../services/ohlcv.js";
+import { getOhlcv, isTimeframe, TIMEFRAMES, type Denom } from "../services/ohlcv.js";
 
 export const ohlcvRouter = Router();
 
@@ -24,7 +24,10 @@ ohlcvRouter.get("/:mint", async (req, res, next) => {
       res.status(400).json({ error: `tf must be one of ${TIMEFRAMES.join(", ")}` });
       return;
     }
-    const full = await getOhlcv(mint, tf);
+    // The vault's book is denominated in SOL, so a USD chart misstates the
+    // trader's own PnL every time SOL itself moves.
+    const currency: Denom = req.query.currency === "SOL" ? "SOL" : "USD";
+    const full = await getOhlcv(mint, tf, currency);
 
     const sinceRaw = req.query.since;
     const since = typeof sinceRaw === "string" ? Number(sinceRaw) : NaN;

@@ -309,8 +309,10 @@ export const api = {
    * caller knows to merge, and `gap` when the window no longer reaches back
    * to `since` and a full refetch is required.
    */
-  ohlcv: async (mint: string, tf: ChartTimeframe, since?: number) => {
-    const q = since && since > 0 ? `&since=${Math.floor(since)}` : "";
+  ohlcv: async (mint: string, tf: ChartTimeframe, since?: number, currency: "USD" | "SOL" = "USD") => {
+    const q =
+      (since && since > 0 ? `&since=${Math.floor(since)}` : "") +
+      (currency === "SOL" ? "&currency=SOL" : "");
     return get<{
       candles: Candle[];
       pool: string | null;

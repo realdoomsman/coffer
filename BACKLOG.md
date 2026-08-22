@@ -24,6 +24,12 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 
 ## Terminal parity (vs Axiom/Photon/GMGN token pages)
 
+- ✅ **1s / 15s / 30s candles** — pump.fun serves sub-minute natively. Bars are
+  trade-time (one per second that traded), delta-polled via `?since=`, and the
+  chart refuses to synthesize a bar below a 1m width
+- ✅ **USD / SOL chart denomination** — the vault books PnL in SOL, so a USD
+  chart moves when SOL moves. MCap mode is USD-only (supply x SOL price is not
+  a market cap) and the avg-entry line re-quotes per denomination
 - ✅ Live candles (GeckoTerminal pools), live price, timeframe strip, buys/sells pressure,
   pool tape, presets P1-P3, gas receipt, pinned positions, sell-initials, subscript prices
 - ✅ Token security: mint/freeze authority + largest accounts from mainnet RPC
@@ -34,7 +40,12 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 - ⬜ Bubble map holder-cluster view; bundle analysis (trench.bot-style two-number honesty:
   total bundled % vs still-held %)
 - ⬜ Multi-leg exit strategy on the buy ticket (up to 5 TP/SL legs at entry)
-- ⬜ Position-based (auto-rescaling) limit orders; OCO auto-cancel
+- ✅ Position-based (auto-rescaling) limit orders — a sell order stores a
+  FRACTION and resolves it against the live position at fire time
+  (trading.ts: `tokenAmount = existing.amountTokens * fraction`), so topping
+  up or partially exiting rescales the order automatically. GMGN sells this
+  as "Holdings Percentage Limit Orders". Previously listed here as missing.
+- ⬜ OCO auto-cancel; multi-leg TP/SL ladder at entry; trailing stop
 - ⬜ Token tabs (browser-style chips of open tokens with live mcap)
 
 ## Discovery
@@ -95,6 +106,26 @@ ONE token on demand and far too expensive for 70+ cards every 10s:
 - ⬜ Strategy automation taxonomy (Bloom: Spot / Copy Trade / AFK / Twitter) —
   we have Copy Trade as mirror vaults; AFK and Twitter triggers are open
 - ⬜ Multi-leg TP/SL at entry; draggable limit lines on the chart
+
+## Honest limits of the 1s chart
+
+Measured, not guessed — keep these in product copy:
+- **Sub-4-second, not real-time.** Our floor is client poll + server TTL + two
+  HTTP round trips: swap-api RTT 270-680ms, upstream candles trail the trade
+  feed by 1-3s, client polls at 1.2s. Axiom/Photon/GMGN run co-located
+  validators on Yellowstone geyser near Solana's ~400ms slot boundary. The gap
+  is transport, not tuning. Closing it means a WebSocket price feed (Helius
+  `accountSubscribe` at commitment=processed, bonding-curve account decoding)
+  — a separate project.
+- **Bars are trade-time, not clock-time.** On our own default token only ~6% of
+  seconds have a 1s bar; two adjacent bars can be minutes apart. Forward-filling
+  flat bars would fabricate prints for ~94% of the chart, so we don't.
+- **Sub-minute has no fallback.** GeckoTerminal's floor is 1 minute. If pump.fun
+  fails, a 1s chart shows the stale pill rather than silently serving 1m bars.
+- **No forward pagination upstream.** Six param names tested, all ignored — every
+  refresh re-reads a window. `?since=` moves that cost server-side only.
+- **The header mark can disagree with the chart** (chart ~2s old, mark up to ~8s).
+  Invisible at 5m, visible at 1s.
 
 ## Known bugs / debt
 
