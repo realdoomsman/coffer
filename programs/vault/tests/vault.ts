@@ -25,10 +25,21 @@ const VIRTUAL_LAMPORTS = 1n;
 const MIN_SEED_LAMPORTS = 10_000_000n;
 const PLATFORM_PROFIT_BPS = 1_000n;
 const BPS = 10_000n;
+const SECONDS_PER_DAY = 86_400;
+// Permissionless stale-NAV escape hatch (H1).
+const NAV_EMERGENCY_GRACE_SECONDS = 7 * SECONDS_PER_DAY;
+const EMERGENCY_HAIRCUT_BPS = 500n; // 5%
+const EMERGENCY_PAYOUT_BPS = BPS - EMERGENCY_HAIRCUT_BPS; // 9_500
 const JUPITER_V6 = new PublicKey("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 const BPF_UPGRADEABLE_LOADER = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111"
+);
+const TOKEN_PROGRAM = new PublicKey(
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+);
+const ASSOCIATED_TOKEN_PROGRAM = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 );
 
 // ---------------------------------------------------------------------------
@@ -100,6 +111,12 @@ describe("coffer vault", () => {
     PublicKey.findProgramAddressSync(
       [Buffer.from("vault_depositor"), vaultPda.toBuffer(), authority.toBuffer()],
       program.programId
+    )[0];
+  // Canonical ATA derivation, inlined so this file needs no spl-token import.
+  const wsolAta = (owner: PublicKey) =>
+    PublicKey.findProgramAddressSync(
+      [owner.toBuffer(), TOKEN_PROGRAM.toBuffer(), WSOL_MINT.toBuffer()],
+      ASSOCIATED_TOKEN_PROGRAM
     )[0];
 
   const defaultVaultParams = () => ({
@@ -419,6 +436,125 @@ describe("coffer vault", () => {
     it("withdrawals still work while the vault is frozen and the kill switch is on", async () => {
       // THE liveness invariant. TODO: freeze_vault + set_kill_switch(true),
       // then request/execute a withdrawal successfully; unfreeze + switch off.
+    });
+  });
+
+  // =========================================================================
+  // H1 — permissionless stale-NAV escape hatch (emergency_withdraw)
+  // =========================================================================
+  describe("emergency_withdraw", () => {
+    it("is rejected while the last mark is inside the grace period", async () => {
+      // Runs against the live vault: the mark is minutes old, the grace period
+      // is a week, so the hatch must be shut. This is the half of the
+      // invariant that keeps the haircut path from competing with the normally
+      // priced ones.
+      const d = await program.account.vaultDepositor.fetch(
+        depositorPda(investor.publicKey)
+      );
+      const shares = BigInt(d.shares.toString());
+      assert.isTrue(shares > 0n, "investor still holds shares to test with");
+      try {
+        await program.methods
+          .emergencyWithdraw(new BN(shares.toString()))
+          .accounts({
+            authority: investor.publicKey,
+            vault: vaultPda,
+            depositor: depositorPda(investor.publicKey),
+            trader: trader.publicKey,
+          })
+          .signers([investor])
+          .rpc();
+        assert.fail("should have rejected");
+      } catch (e: any) {
+        assert.include(e.toString(), "NavNotStaleEnough");
+      }
+    });
+
+    it("is allowed once the mark is NAV_EMERGENCY_GRACE_SECONDS old, with the haircut applied", async () => {
+      // TODO(warp): stop posting NAV and advance the clock by
+      // NAV_EMERGENCY_GRACE_SECONDS, then emergencyWithdraw(allShares).
+      // Oracle (mirrors withdraw.rs::handle_emergency_withdraw):
+      //   grossFull = valueForShares(shares, totalShares, nav)   // last mark
+      //   gross     = mulBpsFloor(grossFull, EMERGENCY_PAYOUT_BPS)
+      //   basis     = netDeposits * shares / depositorShares      (floor)
+      //   profit    = max(0, gross - basis)
+      //   traderFee = mulBpsFloor(profit, perfFeeBps)
+      //   platFee   = mulBpsFloor(profit, PLATFORM_PROFIT_BPS)
+      //   payout    = gross - traderFee - platFee
+      // Assert: investor delta == payout; vault.navLamports dropped by exactly
+      // `gross` (NOT grossFull) so the haircut stays with the pool; the
+      // remaining shares' per-share value strictly increased.
+      assert.equal(NAV_EMERGENCY_GRACE_SECONDS, 604_800);
+      const grossFull = 1_000_000n;
+      assert.equal(mulBpsFloor(grossFull, EMERGENCY_PAYOUT_BPS), 950_000n);
+      assert.equal(
+        grossFull - mulBpsFloor(grossFull, EMERGENCY_PAYOUT_BPS),
+        mulBpsFloor(grossFull, EMERGENCY_HAIRCUT_BPS),
+        "haircut is exactly 5% of the gross at these magnitudes"
+      );
+    });
+
+    it("needs no keeper, admin or trader — and ignores freeze + kill switch", async () => {
+      // THE entitlement invariant. TODO(warp): with the mark abandoned past
+      // the grace period, freeze_vault (platform) + setKillSwitch(true) +
+      // a nav_keeper set to a key nobody holds -> emergencyWithdraw signed by
+      // the depositor ALONE still succeeds. The instruction takes no
+      // platformConfig account at all, so this can only regress via an
+      // accounts-struct change.
+    });
+
+    it("requires an outstanding request to be cancelled first (spend-once)", async () => {
+      // TODO(warp): requestWithdraw, warp past the grace period,
+      // emergencyWithdraw -> WithdrawRequestPending; cancelWithdrawRequest
+      // (never NAV-gated, so it works on a dead vault) -> then it succeeds.
+    });
+  });
+
+  // =========================================================================
+  // H2 — permissionless forced settlement unwind (settle_unwrap)
+  // =========================================================================
+  describe("settle_unwrap", () => {
+    it("is rejected when the witness has no matured, unpayable request", async () => {
+      // TODO: needs the vault's wSOL ATA to exist first (anyone may create it
+      // permissionlessly). With the investor's request already executed there
+      // is no pending request at all, so this must fail NoWithdrawRequest:
+      //
+      //   await program.methods.settleUnwrap()
+      //     .accounts({
+      //       vault: vaultPda,
+      //       depositor: depositorPda(investor.publicKey),
+      //       wsolAccount: wsolAta(vaultPda),
+      //       tokenProgram: TOKEN_PROGRAM,
+      //     }).rpc();  // -> NoWithdrawRequest
+      assert.notEqual(
+        wsolAta(vaultPda).toBase58(),
+        vaultPda.toBase58(),
+        "vault wSOL ATA is a distinct account from the vault PDA"
+      );
+    });
+
+    it("is rejected while the vault can still pay the matured request", async () => {
+      // The anti-grief half of the guard. TODO: with the buffer intact,
+      // requestWithdraw a small amount (redeemWindowSeconds = 0 in these
+      // params, so it matures immediately) and call settleUnwrap ->
+      // SettlementNotOwed, because
+      //   lamports - rentMin - platformFeesOwed >= pendingWithdrawValue.
+      // Then cancelWithdrawRequest to leave the vault clean.
+    });
+
+    it("is accepted, by anyone, once a matured request cannot be paid", async () => {
+      // TODO: wrapSol(free buffer) as the trader -> requestWithdraw(shares)
+      // as the investor -> the request matures with the buffer empty ->
+      // settleUnwrap sent by an unrelated keypair (no signer field on the
+      // instruction; the stranger is only the fee payer) succeeds.
+      // Assert: the vault's lamports grew by the closed ATA's balance
+      // (wrapped amount + its rent), the wSOL ATA no longer exists, and the
+      // previously stranded executeWithdraw now succeeds.
+    });
+
+    it("does not disturb the trade-authority unwrap path", async () => {
+      // TODO: trader-signed unwrapSol still works with no matured request
+      // outstanding (settle_unwrap is additive, not a replacement).
     });
   });
 

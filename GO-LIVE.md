@@ -42,13 +42,20 @@ bash scripts/deploy-devnet.sh
 The deployer needs ~3-5 devnet SOL. `solana airdrop 5` is rate-limited most of
 the time; https://faucet.solana.com is the reliable source.
 
-## 2. Real accounts — needs signups (I can't create accounts)
+## 2. Real accounts
 
-- **Privy App ID** → dashboard.privy.io, create an app, put the App ID in `.env`
-  as `VITE_PRIVY_APP_ID`. Until then the app runs demo auth with no wallet.
+- **Privy — DONE.** App "Coffer" (`cmt3yc8rl00j60cl7newtkhok`) is live in `.env`.
+  Configured: allowed origins (`localhost:5173`, `coffer.fun`, `www.coffer.fun`),
+  **email + Google login**, and **external wallets turned OFF** — this platform is
+  account-creation, never wallet-connect. Verified end-to-end: the login modal
+  opens on localhost with exactly those two methods.
+  - Still yours: sign up once to create the first real user, and flip the app from
+    DEVELOPMENT to production in the Privy dashboard when you launch (dev mode
+    caps at 150 users).
 - **Helius API key** (free tier is fine) → helius.dev, set `MAINNET_RPC_URL`.
   Unblocks full-depth wallet scans and the token top-10 holder read, which the
   public RPC rate-limits.
+- **Domain** — `coffer.fun` is registered. Point it at the app when you deploy.
 
 ## 3. Before real money (not optional)
 
