@@ -51,9 +51,10 @@ pub mod state;
 
 use instructions::*;
 
-// Placeholder id (the standard Anchor template key). After the first
-// `anchor build`, run `anchor keys sync` to stamp the real program id here
-// and in Anchor.toml.
+// The deployed program id. Live on devnet since 2026-08-22 (slot
+// 486490805), upgrade authority 7UxfASUxKNkmTcJyiibRkxSiQ963qHg7ywrtEYumgKVk.
+// It must keep matching target/deploy/vault-keypair.json — a mismatch makes
+// every PDA derivation and CPI signature wrong at runtime, not at build time.
 declare_id!("8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U");
 
 #[program]
