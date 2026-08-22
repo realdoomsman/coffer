@@ -43,20 +43,10 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
   if (!user) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(10, 10, 8, 0.82)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 90,
-      }}
-      onClick={onClose}
-    >
+    <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="panel"
-        style={{ width: 380, maxWidth: "92vw", boxShadow: "10px 10px 0 rgba(0,0,0,0.5)" }}
+        className="modal-card"
+        style={{ maxWidth: 380 }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Deposit SOL"
@@ -88,7 +78,7 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
             <>
               <canvas
                 ref={canvasRef}
-                style={{ border: "1px solid var(--line-2)", imageRendering: "pixelated" }}
+                style={{ border: "1px solid var(--line-2)", imageRendering: "pixelated", maxWidth: "100%", height: "auto" }}
                 aria-label="Deposit address QR code"
               />
               <button

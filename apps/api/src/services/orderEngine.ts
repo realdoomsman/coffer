@@ -25,8 +25,15 @@ import { prisma } from "../db.js";
 import { getTokenInfos } from "./prices.js";
 import { executeTrade, TradeError } from "./trading.js";
 
-const ORDER_TICK_MS = 15_000;
-const REVAL_TICK_MS = 30_000;
+// Trigger latency the user actually feels. Early-returns when nothing is
+// open, and batches one price lookup per distinct mint, so 6s is cheap.
+const ORDER_TICK_MS = 6_000;
+// Marks drive both displayed PnL and TVL. The upstream price cache is 5s, so
+// a faster tick costs nothing there; the write volume is what it protects
+// against, and MARK_EPSILON below handles that.
+const REVAL_TICK_MS = 8_000;
+/** Skip the DB write when a mark moved by less than this fraction. */
+const MARK_EPSILON = 0.0002;
 const EQUITY_MAX_AGE_SEC = 300; // append a point when last is older
 
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -226,12 +233,17 @@ async function revalTick(): Promise<void> {
           }
           continue;
         }
+        const valueSol = pos.amountTokens * info.priceSol;
+        const stale = info.source === "stale";
+        // ticking 4x faster shouldn't mean 4x the writes — only persist a
+        // mark that actually moved (or a staleness flag that flipped)
+        const moved =
+          pos.valueSol <= 0 ||
+          Math.abs(valueSol - pos.valueSol) / pos.valueSol > MARK_EPSILON;
+        if (!moved && stale === pos.markStale) continue;
         await prisma.position.update({
           where: { id: pos.id },
-          data: {
-            valueSol: pos.amountTokens * info.priceSol,
-            markStale: info.source === "stale",
-          },
+          data: { valueSol, markStale: stale },
         });
       } catch (err) {
         console.error(`[engine] error revaluing position ${pos.id}:`, err);

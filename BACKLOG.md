@@ -57,7 +57,12 @@ Photon / Padre feature-for-feature. Ordered by what moves trust and money first.
 ## Platform
 
 - ⬜ Points/cashback ledger surfaces (fees are logged, UI missing)
-- ⬜ Buyback-and-lock automation + public lock address page
+- ~~Buyback-and-lock automation + public lock address page~~ — **dropped.** The 10% platform
+  cut that funded it no longer exists; those points are now the trader's 60-day vested fee.
+- ⬜ Fee escrow on-chain: move the vested third to FEE_ESCROW_WALLET for real (devnet ledger
+  entries are bookkeeping today), and back a claim with an actual transfer signature
+- ⬜ Program upgrade for the new split — see README; the deployed bytecode still charges the
+  old trader fee + 10% platform cut with no vesting
 - ⬜ Notifications (fills, TP/SL, vault events) beyond toasts — PWA push
 - ⬜ Real auth end-to-end (Privy app id, session signers, key export UI)
 - ⬜ Postgres migration + deploy story (Render/Vercel like PaperApe)

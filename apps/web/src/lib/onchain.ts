@@ -32,3 +32,43 @@ export function decodeTransaction(base64: string): VersionedTransaction | Transa
 export function isSolanaAddress(v: string | undefined): v is string {
   return typeof v === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v);
 }
+
+// ── display helpers ─────────────────────────────────────────────────
+// The shared solscan* helpers assume mainnet. Real vaults run on devnet
+// today, and a devnet signature opened without ?cluster resolves to
+// nothing — which reads as "the transaction never happened". These
+// carry the cluster through so a proof link always proves something.
+
+/** Solscan needs an explicit cluster for anything but mainnet-beta. */
+function clusterQuery(cluster: string): string {
+  return cluster === "mainnet-beta" || cluster === "mainnet" ? "" : `?cluster=${cluster}`;
+}
+
+export function explorerTxUrl(signature: string, cluster: string): string {
+  return `https://solscan.io/tx/${signature}${clusterQuery(cluster)}`;
+}
+
+export function explorerAddressUrl(address: string, cluster: string): string {
+  return `https://solscan.io/account/${address}${clusterQuery(cluster)}`;
+}
+
+/** Lamports (u64, arrives as a decimal string) → SOL. */
+export function lamportsToSol(lamports: string | number | bigint): number {
+  return Number(BigInt(lamports)) / 1e9;
+}
+
+/**
+ * Shares are stored on-chain as u128 in units of 1e12 per SOL, so they
+ * arrive as decimal strings that overflow a Number. Convert with BigInt
+ * first, then format — parsing the string as a float directly loses
+ * precision on any realistic balance.
+ */
+const SHARE_UNITS_PER_SOL = 1_000_000_000_000n;
+
+export function formatShares(raw: string | bigint, decimals = 4): string {
+  const units = BigInt(raw);
+  const whole = units / SHARE_UNITS_PER_SOL;
+  const frac = units % SHARE_UNITS_PER_SOL;
+  const fracStr = frac.toString().padStart(12, "0").slice(0, decimals);
+  return decimals > 0 ? `${whole}.${fracStr}` : whole.toString();
+}

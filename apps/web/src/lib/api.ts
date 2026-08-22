@@ -17,6 +17,8 @@ import type {
   TradeResult,
   TrendingToken,
   Vault,
+  VestedFeeSummary,
+  VestedFeeTranche,
   WithdrawRequest,
 } from "@coffer/shared";
 
@@ -360,6 +362,21 @@ export const api = {
   },
   pulse: () => get<PulseBoard>(`/pulse`),
   tokenStats: (mint: string) => get<TokenPoolStats>(`/tokenstats/${mint}`),
+
+  // ── vested (escrowed) trader fees ──
+  // The third of every performance fee that sits in escrow for 60 days.
+  // Omit traderId for the demo/authenticated user.
+  vested: (traderId?: string) =>
+    get<VestedFeeSummary & { lockDays: number; now: number }>(
+      `/vested${traderId ? `?traderId=${encodeURIComponent(traderId)}` : ""}`,
+    ),
+  claimVested: (id: string) =>
+    post<{
+      tranche: VestedFeeTranche;
+      claimSig: string | null;
+      escrowWallet: string | null;
+      summary: VestedFeeSummary;
+    }>(`/vested/${id}/claim`, {}),
 
   // ── real, user-signed on-chain deposits ──
   // prepare returns an UNSIGNED transaction; the user's wallet signs and

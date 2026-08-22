@@ -1,0 +1,77 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{background:#111;margin:0;padding:20px;font-family:monospace;color:#eee}canvas{display:block;margin:10px 0;max-width:100%}</style>
+</head><body>
+<canvas id="pfp" width="400" height="400"></canvas>
+<canvas id="banner" width="1500" height="500"></canvas>
+<script>
+const INK="#0a0a08", AMBER="#ffb000", TEXT="#e9e6da", MUTED="#9a968a", LINE="#38382f";
+
+function dots(ctx,w,h,color,pitch,r){
+  ctx.fillStyle=color;
+  for(let y=pitch/2;y<h;y+=pitch)for(let x=pitch/2;x<w;x+=pitch){
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function drawPfp(){
+  const c=document.getElementById('pfp'),ctx=c.getContext('2d'),S=400;
+  ctx.fillStyle=AMBER;ctx.fillRect(0,0,S,S);
+  dots(ctx,S,S,"rgba(10,10,8,0.13)",26,1.5);
+  // hard inner frame — brutalist rule, survives the circular crop
+  ctx.strokeStyle=INK;ctx.lineWidth=7;ctx.strokeRect(29,29,S-58,S-58);
+  ctx.fillStyle=INK;
+  ctx.font='700 250px "Space Mono", monospace';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('C',S/2,S/2+6);
+}
+
+function drawBanner(){
+  const c=document.getElementById('banner'),ctx=c.getContext('2d'),W=1500,H=500;
+  ctx.fillStyle=INK;ctx.fillRect(0,0,W,H);
+  dots(ctx,W,H,"rgba(233,230,218,0.05)",26,1.5);
+  // X overlays the avatar bottom-left and crops top/bottom on mobile:
+  // everything lives right of 400px and vertically centred.
+  const X=400;
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';
+  ctx.fillStyle=AMBER;
+  ctx.font='500 19px "IBM Plex Mono", monospace';
+  ctx.letterSpacing='5px';
+  ctx.fillText('TRADER VAULTS ON SOLANA',X,150);
+  ctx.letterSpacing='0px';
+  ctx.font='700 60px "Space Mono", monospace';
+  ctx.fillStyle=TEXT;ctx.fillText('BACK THE BEST TRADERS.',X,228);
+  ctx.fillStyle=AMBER;ctx.fillText('THEY CAN NEVER RUN.',X,300);
+  ctx.fillStyle=AMBER;ctx.fillRect(X,330,96,4);
+  // fact chips
+  ctx.font='400 16px "IBM Plex Mono", monospace';
+  const chips=[['70%',' to depositors'],['Traders trade.'," They can't withdraw."],['Every record',' on-chain']];
+  let cx=X;
+  for(const [b,rest] of chips){
+    const wB=ctx.measureText(b).width, wR=ctx.measureText(rest).width, w=wB+wR+30;
+    ctx.strokeStyle=LINE;ctx.lineWidth=1;ctx.strokeRect(cx+0.5,368.5,w,38);
+    ctx.fillStyle=TEXT;ctx.fillText(b,cx+15,392);
+    ctx.fillStyle=MUTED;ctx.fillText(rest,cx+15+wB,392);
+    cx+=w+14;
+  }
+  ctx.fillStyle=AMBER;ctx.font='500 20px "IBM Plex Mono", monospace';
+  ctx.letterSpacing='2px';
+  const url='coffer.fun';
+  ctx.textAlign='right';ctx.fillText(url,W-70,448);
+}
+
+(async()=>{
+  await document.fonts.load('700 250px "Space Mono"');
+  await document.fonts.load('700 60px "Space Mono"');
+  await document.fonts.load('500 19px "IBM Plex Mono"');
+  await document.fonts.load('400 16px "IBM Plex Mono"');
+  await document.fonts.ready;
+  drawPfp();drawBanner();
+  window.__assets={
+    pfp:document.getElementById('pfp').toDataURL('image/png'),
+    banner:document.getElementById('banner').toDataURL('image/png')
+  };
+  window.__ready=true;
+})();
+</script></body></html>

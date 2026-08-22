@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { PERF_FEE_DEFAULT_BPS, PERF_FEE_MAX_BPS, PERF_FEE_MIN_BPS } from "@coffer/shared";
+import {
+  PERF_FEE_DEFAULT_BPS,
+  PERF_FEE_MAX_BPS,
+  PERF_FEE_MIN_BPS,
+  splitPerfFeeBps,
+  VEST_LOCK_DAYS,
+} from "@coffer/shared";
 import { api } from "../lib/api";
 import { usePageTitle } from "../lib/hooks";
 
@@ -19,6 +25,7 @@ export function CreateVault() {
   const [maxSol, setMaxSol] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const feeSplit = splitPerfFeeBps(Math.round(perfFee * 100));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -134,7 +141,12 @@ export function CreateVault() {
               value={perfFee}
               onChange={(e) => setPerfFee(Number(e.target.value))}
             />
-            <div className="hint">Charged per-depositor above their high-water mark, only when profit is realized. Changeable later — downward only.</div>
+            <div className="hint">
+              You take {(feeSplit.immediateBps / 100).toFixed(1)}% on exit and{" "}
+              {(feeSplit.vestedBps / 100).toFixed(1)}% goes to escrow for {VEST_LOCK_DAYS} days —
+              one third of every fee vests. Charged per-depositor above their high-water mark, only
+              when profit is realized. Changeable later — downward only.
+            </div>
           </div>
 
           <div className="field">
@@ -153,7 +165,15 @@ export function CreateVault() {
             <div className="sectiontitle" style={{ marginTop: 0 }}>What you get</div>
             <ul style={{ margin: 0, paddingLeft: 18, color: "var(--muted)", fontSize: 13.5 }}>
               <li>A program-owned vault — depositors' SOL, your trading.</li>
-              <li>{"70/20/10 split: depositors keep 70% of profit, you earn 20%, platform takes 10% (which buys & locks the token)."}</li>
+              <li>
+                70 / 30 split: depositors keep 70% of profit, you earn {perfFee.toFixed(0)}%. The
+                platform takes no cut.
+              </li>
+              <li>
+                Of your fee, {(feeSplit.immediateBps / 100).toFixed(1)}% is paid on exit and{" "}
+                {(feeSplit.vestedBps / 100).toFixed(1)}% is held in escrow for {VEST_LOCK_DAYS}{" "}
+                days before you can claim it — vesting is what makes depositors trust a new trader.
+              </li>
               <li>Public track record page computed from chain data.</li>
               <li>Optional: link X, import paper-trading stats.</li>
             </ul>
@@ -162,6 +182,16 @@ export function CreateVault() {
             What you can't do: withdraw depositor funds, raise fees, or block withdrawals. That's the
             product — say it loudly on your vault page.
           </div>
+          {mode === "real" && (
+            <div className="callout red">
+              Real vaults today: the terms above are NOT what the deployed program enforces. Its
+              live bytecode still pays the trader {perfFee.toFixed(0)}% in full on exit — no
+              escrow — and charges a separate 10% platform cut on top, so depositors would keep{" "}
+              {(90 - perfFee).toFixed(0)}%, not 70%. The 70 / 30 vesting terms take effect on real
+              vaults only after the program is upgraded and redeployed. Paper vaults already run
+              the new economics.
+            </div>
+          )}
         </div>
       </div>
     </>

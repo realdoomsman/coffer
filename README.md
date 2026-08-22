@@ -3,8 +3,15 @@
 Trader vaults on Solana. Anyone can open a vault — even with zero SOL. Investors fund it,
 the trader trades it through a scoped program instruction, and **the trader can never
 withdraw**: custody lives in a program-owned PDA with no code path that moves funds to a
-non-vault account. Profits split 70% depositors / 20% trader / 10% platform, and the
-platform's cut buys and locks the token.
+non-vault account. Profits split 70% depositors / 30% trader; the platform takes no cut.
+A third of the trader's fee is routed to a platform-controlled escrow wallet and locked
+for 60 days before they can claim it, so a trader who blows up or disappears cannot walk
+away with their whole fee immediately.
+
+> **On-chain status:** the deployed devnet program still implements the PREVIOUS split
+> (trader's full `perf_fee_bps` on exit plus a separate 10% platform cut, no escrow). The
+> 70/30 vesting economics are live on the paper ledger today; real vaults follow once the
+> program is upgraded and redeployed.
 
 Blueprint (decisions, research, roadmap): see the published artifact from the planning
 session. Working codename "Coffer" — rename freely.

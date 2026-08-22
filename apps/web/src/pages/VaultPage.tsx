@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { fmtPct, fmtSol } from "@coffer/shared";
+import { fmtPct, fmtSol, splitPerfFeeBps, VEST_LOCK_DAYS } from "@coffer/shared";
 import { api, type VaultDetail } from "../lib/api";
 import { usePageTitle } from "../lib/hooks";
 import { AddressChip, Delta, EquityChart, Stat, StatusPill, TypePill } from "../components/bits";
@@ -60,6 +60,7 @@ export function VaultPage() {
   if (!data) return <div className="empty">Loading vault…</div>;
   const { vault, positions, trades } = data;
   const s = vault.stats;
+  const feeSplit = splitPerfFeeBps(vault.perfFeeBps);
 
   return (
     <>
@@ -83,7 +84,7 @@ export function VaultPage() {
       </div>
 
       <div className="sidegrid">
-        <div>
+        <div className="sg-head">
           <div className="statrow" style={{ marginBottom: 16 }}>
             <Stat k="TVL" v={`${fmtSol(vault.tvlSol)} ◎`} />
             <Stat k="30d return" v={fmtPct(s.pnlPct30d)} tone={s.pnlPct30d >= 0 ? "pos" : "neg"} />
@@ -118,33 +119,31 @@ export function VaultPage() {
               })()}
             />
           </div>
-
-          {vault.thesis && (
-            <div className="panel panel-pad" style={{ marginBottom: 16 }}>
-              <div className="sectiontitle" style={{ marginTop: 0 }}>Thesis</div>
-              <p className="mutedtx" style={{ margin: 0 }}>{vault.thesis}</p>
-            </div>
-          )}
-
-          <div className="sectiontitle">Open positions</div>
-          <div className="panel">
-            <PositionsTable positions={positions} />
-          </div>
-
-          <div className="sectiontitle">Trade tape</div>
-          <div className="panel">
-            <TradeTape trades={trades} showLag={vault.type === "mirror"} />
-          </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="sg-side" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <DepositPanel vault={vault} onChanged={load} />
 
           <div className="panel panel-pad">
             <div className="sectiontitle" style={{ marginTop: 0 }}>The deal</div>
+            {/* A real vault is settled by the DEPLOYED bytecode, which still
+                runs the old split. Show what it actually enforces — the new
+                terms are described below as pending the program upgrade. */}
             <div className="kv">
               <span className="k">If you profit</span>
-              <span className="v">keep {(100 - vault.perfFeeBps / 100 - 10).toFixed(0)}% · trader {(vault.perfFeeBps / 100).toFixed(0)}% · platform 10%</span>
+              <span className="v">
+                {vault.mode === "real"
+                  ? `keep ${(90 - vault.perfFeeBps / 100).toFixed(0)}% · trader ${(vault.perfFeeBps / 100).toFixed(0)}% · platform 10%`
+                  : `keep ${(100 - vault.perfFeeBps / 100).toFixed(0)}% · trader ${(vault.perfFeeBps / 100).toFixed(0)}% · platform 0%`}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Trader's cut is split</span>
+              <span className="v">
+                {vault.mode === "real"
+                  ? "no — full fee paid on exit"
+                  : `${(feeSplit.immediateBps / 100).toFixed(0)}% now · ${(feeSplit.vestedBps / 100).toFixed(0)}% vested ${VEST_LOCK_DAYS}d`}
+              </span>
             </div>
             <div className="kv"><span className="k">If you lose</span><span className="v">no fees, ever</span></div>
             <div className="kv"><span className="k">Big-exit wait</span><span className="v">up to {vault.redeemWindowHours}h</span></div>
@@ -153,9 +152,25 @@ export function VaultPage() {
             <div className="kv">
               <span className="k">Fees paid so far</span>
               <span className="v" title="Charged only on realized profit above each depositor's cost basis — a recovery back to break-even is never charged">
-                trader {fmtSol(vault.traderFeesAccruedSol)} ◎ · buyback {fmtSol(vault.platformFeesAccruedSol)} ◎
+                trader {fmtSol(vault.traderFeesAccruedSol)} ◎ · escrowed {fmtSol(vault.vestedFeesAccruedSol)} ◎
               </span>
             </div>
+            {vault.mode === "real" ? (
+              <p className="dimtx" style={{ fontSize: 11.5, marginBottom: 0 }}>
+                <strong>These are the deployed program's terms, not Coffer's new ones.</strong> The
+                live bytecode pays the trader their full fee on exit and takes a separate 10%
+                platform cut. Coffer's new deal — depositors keep 70%, the platform takes nothing,
+                and a third of the trader's fee is escrowed for {VEST_LOCK_DAYS} days — is running
+                on paper vaults today and reaches real vaults only when the program is upgraded and
+                redeployed.
+              </p>
+            ) : (
+              <p className="dimtx" style={{ fontSize: 11.5, marginBottom: 0 }}>
+                A third of the trader's fee is locked in escrow for {VEST_LOCK_DAYS} days before
+                they can claim it, so a trader who blows up or disappears can't walk away with
+                their whole fee the day they earn it. The platform takes no cut at all.
+              </p>
+            )}
           </div>
 
           {vault.type === "mirror" && mirror && (
@@ -199,7 +214,13 @@ export function VaultPage() {
               const dep = parseFloat(hypo) || 0;
               const ret = vault.stats.pnlPct30d / 100;
               const gross = dep * ret;
-              const yours = gross > 0 ? gross * 0.7 : gross;
+              // Real vaults settle under the DEPLOYED program: trader fee
+              // plus a 10% platform cut on top. Paper vaults are the new
+              // deal — the trader's fee is the only thing charged.
+              const platformRate = vault.mode === "real" ? 0.1 : 0;
+              const traderRate = vault.perfFeeBps / 10_000;
+              const yoursRate = 1 - traderRate - platformRate;
+              const yours = gross > 0 ? gross * yoursRate : gross;
               return (
                 <>
                   <div className="kv">
@@ -209,7 +230,7 @@ export function VaultPage() {
                     </span>
                   </div>
                   <div className="kv">
-                    <span className="k">Your cut (70%)</span>
+                    <span className="k">Your cut ({(yoursRate * 100).toFixed(0)}%)</span>
                     <span className={`v ${yours >= 0 ? "pos" : "neg"}`}>
                       {yours >= 0 ? "+" : ""}{fmtSol(yours)} ◎
                     </span>
@@ -217,7 +238,9 @@ export function VaultPage() {
                   <div className="kv">
                     <span className="k">Trader / platform</span>
                     <span className="v dimtx">
-                      {gross > 0 ? `${fmtSol(gross * 0.2)} / ${fmtSol(gross * 0.1)} ◎` : "0 — no profit, no fee"}
+                      {gross > 0
+                        ? `${fmtSol(gross * traderRate)} / ${fmtSol(gross * platformRate)} ◎`
+                        : "0 — no profit, no fee"}
                     </span>
                   </div>
                   <p className="dimtx" style={{ fontSize: 11, marginBottom: 0 }}>
@@ -258,6 +281,25 @@ export function VaultPage() {
                 <div className="dimtx" style={{ fontSize: 11.5 }}>Simulated fills — not comparable to live results.</div>
               </>
             )}
+          </div>
+        </div>
+
+        <div className="sg-body">
+          {vault.thesis && (
+            <div className="panel panel-pad" style={{ marginBottom: 16 }}>
+              <div className="sectiontitle" style={{ marginTop: 0 }}>Thesis</div>
+              <p className="mutedtx" style={{ margin: 0 }}>{vault.thesis}</p>
+            </div>
+          )}
+
+          <div className="sectiontitle">Open positions</div>
+          <div className="panel">
+            <PositionsTable positions={positions} />
+          </div>
+
+          <div className="sectiontitle">Trade tape</div>
+          <div className="panel">
+            <TradeTape trades={trades} showLag={vault.type === "mirror"} />
           </div>
         </div>
       </div>

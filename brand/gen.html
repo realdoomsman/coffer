@@ -1,12 +1,17 @@
 <!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<style>body{background:#111;margin:0;padding:20px;font-family:monospace;color:#eee}canvas{display:block;margin:10px 0;max-width:100%}</style>
+<style>body{background:#222;margin:0;padding:16px;font-family:monospace;color:#eee}
+canvas{display:block;margin:8px 0;max-width:100%;background:#000}
+.lbl{font-size:12px;color:#9a968a;margin-top:14px}
+.circ{border-radius:50%}</style>
 </head><body>
-<canvas id="pfp" width="400" height="400"></canvas>
+<div class="lbl">pfp 400×400 (shown circular, as X renders it)</div>
+<canvas id="pfp" class="circ" width="400" height="400"></canvas>
+<div class="lbl">banner 1500×500</div>
 <canvas id="banner" width="1500" height="500"></canvas>
 <script>
-const INK="#0a0a08", AMBER="#ffb000", TEXT="#e9e6da", MUTED="#9a968a", LINE="#38382f";
+const INK="#0a0a08", AMBER="#ffb000", TEXT="#e9e6da", MUTED="#9a968a", LINE="#3d3d33";
 
 function dots(ctx,w,h,color,pitch,r){
   ctx.fillStyle=color;
@@ -15,63 +20,74 @@ function dots(ctx,w,h,color,pitch,r){
   }
 }
 
+/* X CROPS AVATARS TO A CIRCLE. A square frame loses its corners and reads
+   as broken, so the only geometry here is concentric with the crop. */
 function drawPfp(){
-  const c=document.getElementById('pfp'),ctx=c.getContext('2d'),S=400;
-  ctx.fillStyle=AMBER;ctx.fillRect(0,0,S,S);
-  dots(ctx,S,S,"rgba(10,10,8,0.13)",26,1.5);
-  // hard inner frame — brutalist rule, survives the circular crop
-  ctx.strokeStyle=INK;ctx.lineWidth=7;ctx.strokeRect(29,29,S-58,S-58);
+  const c=document.getElementById('pfp'),ctx=c.getContext('2d'),S=400,M=S/2;
+  ctx.fillStyle=INK;ctx.fillRect(0,0,S,S);
+  // amber disc fills the crop edge-to-edge
+  ctx.fillStyle=AMBER;ctx.beginPath();ctx.arc(M,M,M,0,Math.PI*2);ctx.fill();
+  // dot grid, clipped to the disc
+  ctx.save();ctx.beginPath();ctx.arc(M,M,M,0,Math.PI*2);ctx.clip();
+  dots(ctx,S,S,"rgba(10,10,8,0.12)",26,1.5);ctx.restore();
+  // ring follows the crop instead of fighting it
+  ctx.strokeStyle=INK;ctx.lineWidth=9;
+  ctx.beginPath();ctx.arc(M,M,M-26,0,Math.PI*2);ctx.stroke();
+  // C sized to sit comfortably inside the ring
   ctx.fillStyle=INK;
-  ctx.font='700 250px "Space Mono", monospace';
+  ctx.font='700 208px "Space Mono", monospace';
   ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText('C',S/2,S/2+6);
+  ctx.fillText('C',M,M+5);
 }
 
 function drawBanner(){
   const c=document.getElementById('banner'),ctx=c.getContext('2d'),W=1500,H=500;
   ctx.fillStyle=INK;ctx.fillRect(0,0,W,H);
-  dots(ctx,W,H,"rgba(233,230,218,0.05)",26,1.5);
-  // X overlays the avatar bottom-left and crops top/bottom on mobile:
-  // everything lives right of 400px and vertically centred.
-  const X=400;
+  dots(ctx,W,H,"rgba(233,230,218,0.055)",26,1.5);
+
+  // amber spine down the left — gives the empty avatar gutter a job
+  ctx.fillStyle=AMBER;ctx.fillRect(0,0,10,H);
+
+  // SAFE AREA: the avatar sits bottom-left (~x<300, y>300) and narrow
+  // viewports crop top/bottom, so type lives x>=330 and y in 120..390.
+  const X=330;
   ctx.textAlign='left';ctx.textBaseline='alphabetic';
+
   ctx.fillStyle=AMBER;
-  ctx.font='500 19px "IBM Plex Mono", monospace';
-  ctx.letterSpacing='5px';
-  ctx.fillText('TRADER VAULTS ON SOLANA',X,150);
+  ctx.font='600 20px "IBM Plex Mono", monospace';
+  ctx.letterSpacing='7px';
+  ctx.fillText('TRADER VAULTS ON SOLANA',X,163);
   ctx.letterSpacing='0px';
-  ctx.font='700 60px "Space Mono", monospace';
-  ctx.fillStyle=TEXT;ctx.fillText('BACK THE BEST TRADERS.',X,228);
-  ctx.fillStyle=AMBER;ctx.fillText('THEY CAN NEVER RUN.',X,300);
-  ctx.fillStyle=AMBER;ctx.fillRect(X,330,96,4);
-  // fact chips
-  ctx.font='400 16px "IBM Plex Mono", monospace';
-  const chips=[['70%',' to depositors'],['Traders trade.'," They can't withdraw."],['Every record',' on-chain']];
+
+  // bigger, tighter headline — this is the whole message
+  ctx.font='700 76px "Space Mono", monospace';
+  ctx.fillStyle=TEXT;ctx.fillText('BACK THE BEST TRADERS.',X,252);
+  ctx.fillStyle=AMBER;ctx.fillText('THEY CAN NEVER RUN.',X,336);
+
+  // proof chips, baseline-aligned under the headline
+  ctx.font='500 17px "IBM Plex Mono", monospace';
+  const chips=[['70%',' to depositors'],['Traders trade.'," they can't withdraw"],['Every record',' on-chain']];
   let cx=X;
   for(const [b,rest] of chips){
-    const wB=ctx.measureText(b).width, wR=ctx.measureText(rest).width, w=wB+wR+30;
-    ctx.strokeStyle=LINE;ctx.lineWidth=1;ctx.strokeRect(cx+0.5,368.5,w,38);
-    ctx.fillStyle=TEXT;ctx.fillText(b,cx+15,392);
-    ctx.fillStyle=MUTED;ctx.fillText(rest,cx+15+wB,392);
-    cx+=w+14;
+    const wB=ctx.measureText(b).width, wR=ctx.measureText(rest).width, w=wB+wR+32;
+    ctx.strokeStyle=LINE;ctx.lineWidth=1;ctx.strokeRect(cx+0.5,368.5,w,40);
+    ctx.fillStyle=TEXT;ctx.fillText(b,cx+16,393);
+    ctx.fillStyle=MUTED;ctx.fillText(rest,cx+16+wB,393);
+    cx+=w+13;
   }
-  ctx.fillStyle=AMBER;ctx.font='500 20px "IBM Plex Mono", monospace';
-  ctx.letterSpacing='2px';
-  const url='coffer.fun';
-  ctx.textAlign='right';ctx.fillText(url,W-70,448);
+
+  ctx.fillStyle=AMBER;ctx.font='600 22px "IBM Plex Mono", monospace';
+  ctx.letterSpacing='3px';ctx.textAlign='right';
+  ctx.fillText('coffer.fun',W-64,166);
+  ctx.letterSpacing='0px';
 }
 
 (async()=>{
-  await document.fonts.load('700 250px "Space Mono"');
-  await document.fonts.load('700 60px "Space Mono"');
-  await document.fonts.load('500 19px "IBM Plex Mono"');
-  await document.fonts.load('400 16px "IBM Plex Mono"');
+  for(const f of ['700 208px "Space Mono"','700 76px "Space Mono"','600 20px "IBM Plex Mono"','500 17px "IBM Plex Mono"','600 22px "IBM Plex Mono"']) await document.fonts.load(f);
   await document.fonts.ready;
   drawPfp();drawBanner();
-  window.__assets={
-    pfp:document.getElementById('pfp').toDataURL('image/png'),
-    banner:document.getElementById('banner').toDataURL('image/png')
-  };
+  window.__assets={pfp:document.getElementById('pfp').toDataURL('image/png'),
+                   banner:document.getElementById('banner').toDataURL('image/png')};
   window.__ready=true;
 })();
 </script></body></html>

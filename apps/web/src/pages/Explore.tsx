@@ -175,10 +175,10 @@ export function Explore() {
       {vaults && vaults.length > 0 && view === "table" && (
         <div className="panel">
           <div className="tablewrap">
-            <table className="data">
+            <table className="data stack">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th className="hide-sm">#</th>
                   <th>Vault</th>
                   <th>Trader</th>
                   <th></th>
@@ -189,7 +189,7 @@ export function Explore() {
                   <th className="r">TVL</th>
                   <th className="r">Mgr stake</th>
                   <th className="r">Depositors</th>
-                  <th>Curve</th>
+                  <th className="hide-sm">Curve</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,27 +199,27 @@ export function Explore() {
                     onClick={() => nav(`/vault/${v.id}`)}
                     style={{ cursor: "pointer" }}
                   >
-                    <td className={`rank num ${i < 3 && sort === "pnl30d" ? "medal" : ""}`}>
+                    <td className={`rank num hide-sm ${i < 3 && sort === "pnl30d" ? "medal" : ""}`}>
                       {String(i + 1).padStart(2, "0")}
                     </td>
-                    <td>
+                    <td className="lead">
                       <Link to={`/vault/${v.id}`} style={{ color: "var(--text)", fontWeight: 600 }}>
                         {v.name}
                       </Link>
                     </td>
-                    <td className="mono mutedtx" style={{ fontSize: 12 }}>
+                    <td className="mono mutedtx" style={{ fontSize: 12 }} data-label="Trader">
                       @{v.trader.handle}
                       {v.trader.xVerified ? " 𝕏" : ""}
                     </td>
-                    <td><TypePill type={v.type} /></td>
-                    <td className="r num"><Delta v={v.stats.pnlPct30d} /></td>
-                    <td className="r num"><Delta v={v.stats.pnlPctAll} /></td>
-                    <td className="r num neg">{fmtPct(-Math.abs(v.stats.maxDrawdownPct), 0)}</td>
-                    <td className="r num dimtx">{v.stats.winRatePct.toFixed(0)}%</td>
-                    <td className="r num">{fmtSol(v.tvlSol, 0)} ◎</td>
-                    <td className="r num dimtx">{v.managerStakePct.toFixed(0)}%</td>
-                    <td className="r num dimtx">{v.stats.depositorCount}</td>
-                    <td><Sparkline points={v.equityCurve.slice(-40)} width={90} height={26} /></td>
+                    <td data-label="Type"><TypePill type={v.type} /></td>
+                    <td className="r num" data-label="30d"><Delta v={v.stats.pnlPct30d} /></td>
+                    <td className="r num" data-label="All-time"><Delta v={v.stats.pnlPctAll} /></td>
+                    <td className="r num neg" data-label="Max DD">{fmtPct(-Math.abs(v.stats.maxDrawdownPct), 0)}</td>
+                    <td className="r num dimtx" data-label="Win">{v.stats.winRatePct.toFixed(0)}%</td>
+                    <td className="r num" data-label="TVL">{fmtSol(v.tvlSol, 0)} ◎</td>
+                    <td className="r num dimtx" data-label="Mgr stake">{v.managerStakePct.toFixed(0)}%</td>
+                    <td className="r num dimtx" data-label="Depositors">{v.stats.depositorCount}</td>
+                    <td className="hide-sm"><Sparkline points={v.equityCurve.slice(-40)} width={90} height={26} /></td>
                   </tr>
                 ))}
               </tbody>

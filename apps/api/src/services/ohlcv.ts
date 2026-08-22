@@ -20,7 +20,19 @@ const GT_BASE = "https://api.geckoterminal.com/api/v2";
 const FETCH_TIMEOUT_MS = 8_000;
 const POOL_TTL_MS = 600_000; // 10 min
 const POOL_MISS_TTL_MS = 30_000; // failed lookups retry sooner
-const OHLCV_TTL_MS = 30_000;
+/**
+ * Cache a candle set for a fraction of its own bar width, so the forming bar
+ * is never more than a few seconds behind. A flat 30s made a 1m chart look
+ * frozen; a 1h chart doesn't need that pace and shouldn't pay for it.
+ */
+const OHLCV_TTL_BY_TF: Record<Timeframe, number> = {
+  "1m": 5_000,
+  "5m": 10_000,
+  "15m": 20_000,
+  "1h": 45_000,
+};
+const OHLCV_TTL_FALLBACK_MS = 30_000;
+const ttlFor = (tf: Timeframe): number => OHLCV_TTL_BY_TF[tf] ?? OHLCV_TTL_FALLBACK_MS;
 
 export const TIMEFRAMES = ["1m", "5m", "15m", "1h"] as const;
 export type Timeframe = (typeof TIMEFRAMES)[number];
@@ -169,7 +181,7 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
       source: "pumpfun",
     };
     rememberGood(key, fresh);
-    return cacheSet(key, fresh, OHLCV_TTL_MS);
+    return cacheSet(key, fresh, ttlFor(tf));
   }
 
   // 2) GeckoTerminal fallback — pool-based, graduated tokens only.
@@ -204,7 +216,7 @@ export async function getOhlcv(mint: string, tf: Timeframe): Promise<OhlcvResult
           source: "geckoterminal",
         };
         rememberGood(key, fresh);
-        return cacheSet(key, fresh, OHLCV_TTL_MS);
+        return cacheSet(key, fresh, ttlFor(tf));
       }
     } catch {
       // fall through to stale

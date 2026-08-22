@@ -16,7 +16,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
   if (positions.length === 0) return <div className="empty">No open positions — vault is in SOL</div>;
   return (
     <div className="tablewrap">
-      <table className="data">
+      <table className="data stack">
         <thead>
           <tr>
             <th>Token</th>
@@ -30,22 +30,22 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
         <tbody>
           {positions.map((p) => (
             <tr key={p.id}>
-              <td>
+              <td className="lead">
                 <Link to={`/token/${p.mint}`} className="mono">
                   {p.symbol}
                 </Link>
               </td>
-              <td className="r num dimtx">{fmtTokenAmount(p.amountTokens)}</td>
-              <td className="r num">{fmtSol(p.costSol)} ◎</td>
-              <td className="r num">{fmtSol(p.valueSol)} ◎</td>
-              <td className="r num">
+              <td className="r num dimtx" data-label="Amount">{fmtTokenAmount(p.amountTokens)}</td>
+              <td className="r num" data-label="Cost">{fmtSol(p.costSol)} ◎</td>
+              <td className="r num" data-label="Value">{fmtSol(p.valueSol)} ◎</td>
+              <td className="r num" data-label="PnL">
                 <span className={p.pnlSol >= 0 ? "pos" : "neg"}>
                   {p.pnlSol >= 0 ? "+" : ""}
                   {fmtSol(p.pnlSol)} ◎
                 </span>{" "}
                 <Delta v={p.pnlPct} />
               </td>
-              <td className="r">{p.markStale ? <span className="pill stale">stale</span> : <span className="pill neutral">live</span>}</td>
+              <td className="r" data-label="Mark">{p.markStale ? <span className="pill stale">stale</span> : <span className="pill neutral">live</span>}</td>
             </tr>
           ))}
         </tbody>

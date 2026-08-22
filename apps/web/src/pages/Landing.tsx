@@ -43,8 +43,9 @@ export function Landing() {
           </h1>
           <p className="sub">
             Deposit into any vault — the trader trades the pool through a locked program that has
-            no withdrawal path for them. Profits split automatically: 70% to depositors, 20% to the
-            trader, 10% buys and locks the token. Every record public, recomputed from chain data.
+            no withdrawal path for them. Profits split automatically: 70% to depositors, 30% to the
+            trader — and a third of the trader's cut is escrowed for 60 days. The platform takes no
+            cut. Every record public, recomputed from chain data.
           </p>
           <div className="ctas">
             <Link to="/explore" className="btn primary big">Start investing</Link>
@@ -103,11 +104,12 @@ export function Landing() {
             </div>
             <div className="step">
               <span className="n">03 · split profits</span>
-              <h3>70 / 20 / 10, automatically</h3>
+              <h3>70 / 30, automatically</h3>
               <p>
-                Profit above your personal high-water mark splits on exit: 70% stays yours, 20%
-                pays the trader, 10% goes to the platform — every cent of which buys and locks
-                the token. Every vault's full record is public, recomputed from chain data.
+                Profit above your personal high-water mark splits on exit: 70% stays yours, 30%
+                pays the trader. Two thirds of the trader's fee lands immediately; the last third
+                sits in escrow for 60 days, so a trader who blows up or disappears can't take
+                their whole fee and go. Every vault's record is public, recomputed from chain data.
               </p>
             </div>
           </div>

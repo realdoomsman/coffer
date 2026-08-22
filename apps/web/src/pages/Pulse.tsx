@@ -13,6 +13,7 @@ import { usePresets } from "../lib/presets";
 import { useToast } from "../lib/toast";
 import { Skeleton } from "../components/bits";
 import { BondRing, RatioBar } from "../components/market";
+import { RiskPop } from "../components/RiskPop";
 
 // ── per-column filters (Axiom/GMGN-style funnel) ───────────────────
 // Persisted per column id under one key, same store pattern as lib/presets.
@@ -145,8 +146,17 @@ function Card({
   busy: boolean;
 }) {
   const nav = useNavigate();
+  // Chain checks cost an RPC call each, so they load only for the card the
+  // user is actually looking at. Touch devices get an explicit button
+  // instead — there is no hover to lean on.
+  const [inspect, setInspect] = useState(false);
   return (
-    <div className="pcard" onClick={() => nav(`/token/${card.mint}`)}>
+    <div
+      className="pcard"
+      onClick={() => nav(`/token/${card.mint}`)}
+      onMouseEnter={() => setInspect(true)}
+      onMouseLeave={() => setInspect(false)}
+    >
       <BondRing pct={card.bondingPct} src={card.imageUrl} />
       <div className="pmain">
         <div className="prow1">
@@ -175,6 +185,17 @@ function Card({
         </div>
       </div>
       {card.txns5m && <RatioBar a={card.txns5m.buys} b={card.txns5m.sells} width={84} />}
+      <button
+        className={`riskbtn ${inspect ? "on" : ""}`}
+        title="On-chain checks"
+        onClick={(e) => {
+          e.stopPropagation();
+          setInspect((v) => !v);
+        }}
+      >
+        ⚑
+      </button>
+      {inspect && <RiskPop mint={card.mint} bondingPct={card.bondingPct} />}
       <button
         className="zap"
         disabled={busy}
@@ -252,7 +273,7 @@ export function Pulse() {
           <select
             value={quickVault?.id ?? ""}
             onChange={(e) => setVaultId(e.target.value)}
-            style={{ background: "var(--ink)", border: "1px solid var(--line-2)", padding: "5px 9px", fontFamily: "var(--mono)", fontSize: 12 }}
+            className="quickvault"
             aria-label="Quick-buy vault"
           >
             {(vaults ?? []).map((v) => (

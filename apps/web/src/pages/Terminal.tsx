@@ -24,6 +24,9 @@ import {
 } from "@coffer/shared";
 import { api, type DcaOrder } from "../lib/api";
 import { useFlash, usePageTitle, usePoll } from "../lib/hooks";
+import { liveMark, useMarks } from "../lib/marks";
+import { CHART_LAYERS, useChartLayers } from "../lib/chartLayers";
+import { avgEntryUsd, buildMarkers } from "../lib/chartMarkers";
 import { usePresets } from "../lib/presets";
 import { useWatchlist } from "../lib/watchlist";
 import { useToast } from "../lib/toast";
@@ -32,6 +35,21 @@ import { RatioBar, TimeframeStrip } from "../components/market";
 
 const TFS = ["1m", "5m", "15m", "1h"] as const;
 type Tf = (typeof TFS)[number];
+
+/**
+ * Refetch a fraction of each bar's width — a 1m chart on a flat 30s timer
+ * looked frozen. Matches the server's per-timeframe candle cache, so a
+ * faster poll here never costs an extra upstream call.
+ */
+/** Bar width in seconds — used to bucket the forming candle. */
+const TF_SECONDS: Record<Tf, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3_600 };
+
+const CANDLE_POLL_MS: Record<Tf, number> = {
+  "1m": 5_000,
+  "5m": 10_000,
+  "15m": 20_000,
+  "1h": 45_000,
+};
 
 // pump.fun tokens only — default to a deep-liquidity graduated pump token;
 // discovery (trending rail, search, Pulse) surfaces nothing else.
@@ -105,7 +123,6 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
 
   const { data: info } = usePoll<TokenInfo>(() => api.token(mint), 10_000, [mint]);
   const { data: poolStats } = usePoll<TokenPoolStats>(() => api.tokenStats(mint), 30_000, [mint]);
-  const priceFlash = useFlash(info?.priceUsd);
 
   const { data: trending } = usePoll(() => api.trending(), 120_000, []);
   const { data: poolTape } = usePoll(() => api.poolTrades(mint), 15_000, [mint]);
@@ -198,7 +215,40 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     };
   }, []);
 
+  // one poller covers the charted token and every open position, so PnL
+  // moves with the market instead of waiting on the server's revaluation
+  const markMints = useMemo(
+    () => [...new Set([mint, ...positions.map((p) => p.mint)])],
+    [mint, positions],
+  );
+  const marks = useMarks(markMints);
+  const livePriceUsd = marks.get(mint)?.priceUsd ?? info?.priceUsd;
+  const priceFlash = useFlash(livePriceUsd);
+  // SOL/USD straight from this token's own mark — priceUsd and priceSol
+  // are two views of the same quote, so their ratio is the SOL price with
+  // no extra request and no chance of the two drifting apart.
+  const solUsd = (() => {
+    const m = marks.get(mint);
+    return m && m.priceSol > 0 ? m.priceUsd / m.priceSol : undefined;
+  })();
+
+  // ── chart overlay layers ─────────────────────────────────────────
+  const { layers, toggle: toggleLayer } = useChartLayers();
+  const [layerMenu, setLayerMenu] = useState(false);
+  const activeLayerCount = CHART_LAYERS.filter((l) => layers[l.id]).length;
+  // tracked wallets change rarely; this only decides marker colour
+  const { data: tracked } = usePoll(() => api.trackedWallets(), 300_000, []);
+  const trackedSet = useMemo(
+    () => new Set((tracked ?? []).map((w) => w.address)),
+    [tracked],
+  );
+
+
   const [candleVer, setCandleVer] = useState(0);
+  /** Chart subject last auto-framed — see the fit guard below. */
+  const fitKey = useRef<string>("");
+  /** Average-entry line, redrawn whenever the position or scale changes. */
+  const avgLine = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -229,7 +279,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
           setCandleState(rawCandles.current.length > 0 ? "stale" : "none");
         });
     load();
-    const iv = setInterval(load, 30_000);
+    const iv = setInterval(load, CANDLE_POLL_MS[tf]);
     return () => {
       alive = false;
       clearInterval(iv);
@@ -262,34 +312,28 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
         close: c.c * scale,
       })),
     );
-    // your vault's fills painted on the candles — same-second fills merge
-    // into one marker per timestamp (the strict-ordering rule again)
+    // every enabled layer, merged into one strictly-ordered series
     const first = clean[0]?.t ?? 0;
-    const byTs = new Map<number, { buys: number; sells: number }>();
-    for (const t of vaultTrades) {
-      if (t.mint !== mint || t.ts < first) continue;
-      const g = byTs.get(t.ts) ?? { buys: 0, sells: 0 };
-      if (t.side === "buy") g.buys++;
-      else g.sells++;
-      byTs.set(t.ts, g);
-    }
     series.setMarkers(
-      [...byTs.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([ts, g]) => {
-          const mixed = g.buys > 0 && g.sells > 0;
-          const buy = g.buys > 0 && !mixed;
-          return {
-            time: ts as UTCTimestamp,
-            position: buy ? ("belowBar" as const) : ("aboveBar" as const),
-            color: mixed ? "#ffb000" : buy ? "#2fd980" : "#ff4f58",
-            shape: buy ? ("arrowUp" as const) : ("arrowDown" as const),
-            text: mixed ? "B/S" : buy ? (g.buys > 1 ? `B×${g.buys}` : "B") : g.sells > 1 ? `S×${g.sells}` : "S",
-          };
-        }),
+      buildMarkers({
+        mint,
+        firstTs: first,
+        layers,
+        vaultTrades,
+        poolTrades: poolTape ?? null,
+        trackedWallets: trackedSet,
+      }),
     );
-    chart.timeScale().fitContent();
-  }, [candleVer, denom, supplyUi, vaultTrades, mint]);
+
+    // Only frame the chart when its subject changes. Refitting on every
+    // refresh would throw away the user's zoom and pan several times a
+    // minute — the faster the poll, the worse it gets.
+    const subject = `${mint}:${tf}:${denom}`;
+    if (fitKey.current !== subject && clean.length > 0) {
+      fitKey.current = subject;
+      chart.timeScale().fitContent();
+    }
+  }, [candleVer, denom, supplyUi, vaultTrades, mint, tf, layers, poolTape, trackedSet]);
 
   // detect order fills → toast
   const prevOrders = useRef<Map<string, string>>(new Map());
@@ -308,6 +352,74 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
   }, [orders, toast]);
 
   const vault = vaults.find((v) => v.id === vaultId) ?? null;
+  // ── average entry line ───────────────────────────────────────────
+  // Where you're actually break-even, drawn on the same scale as the
+  // candles. Without it you're reading PnL in a table and price on a
+  // chart and doing the comparison in your head on every tick.
+  useEffect(() => {
+    const series = seriesApi.current;
+    if (!series) return;
+    if (avgLine.current) {
+      series.removePriceLine(avgLine.current);
+      avgLine.current = null;
+    }
+    const held = positions.find((p) => p.mint === mint) ?? null;
+    if (!layers.avgEntry || !held) return;
+    const entry = avgEntryUsd(held, solUsd);
+    if (entry === null) return;
+    const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
+    const scale = mcapMode ? supplyUi : 1;
+    const live = marks.get(mint)?.priceUsd;
+    const pct = live && entry > 0 ? ((live - entry) / entry) * 100 : null;
+    avgLine.current = series.createPriceLine({
+      price: entry * scale,
+      color: "#ffb000",
+      lineWidth: 1,
+      lineStyle: 2, // dashed
+      axisLabelVisible: true,
+      title: pct === null ? "avg entry" : `avg entry ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
+    });
+  }, [positions, mint, layers.avgEntry, denom, supplyUi, marks, solUsd]);
+
+  // ── the forming candle ───────────────────────────────────────────
+  // Upstream only hands back whole bars, so between refreshes the right
+  // edge of the chart sat still. Extend the current bucket from the live
+  // mark instead — the same thing a real terminal does — and open a new
+  // bar when the clock rolls into the next bucket. Incremental update()
+  // only, so this never disturbs zoom, pan or markers.
+  useEffect(() => {
+    const series = seriesApi.current;
+    const mark = marks.get(mint);
+    if (!series || !mark || mark.priceUsd <= 0) return;
+    const bars = rawCandles.current;
+    const last = bars[bars.length - 1];
+    if (!last) return; // nothing charted yet — wait for the first fetch
+
+    const width = TF_SECONDS[tf];
+    const bucket = Math.floor(Date.now() / 1000 / width) * width;
+    // a bucket behind the newest bar means upstream is ahead of us; leave it
+    if (bucket < last.t) return;
+
+    if (bucket > last.t) {
+      bars.push({ t: bucket, o: mark.priceUsd, h: mark.priceUsd, l: mark.priceUsd, c: mark.priceUsd });
+    } else {
+      last.c = mark.priceUsd;
+      if (mark.priceUsd > last.h) last.h = mark.priceUsd;
+      if (mark.priceUsd < last.l) last.l = mark.priceUsd;
+    }
+
+    const bar = bars[bars.length - 1]!;
+    const mcapMode = denom === "mcap" && supplyUi !== null && supplyUi > 0;
+    const scale = mcapMode ? supplyUi : 1;
+    series.update({
+      time: bar.t as UTCTimestamp,
+      open: bar.o * scale,
+      high: bar.h * scale,
+      low: bar.l * scale,
+      close: bar.c * scale,
+    });
+  }, [marks, mint, tf, denom, supplyUi]);
+
   const heldPosition = positions.find((p) => p.mint === mint) ?? null;
   const amountNum = parseFloat(amount) || 0;
 
@@ -401,22 +513,25 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
 
       {positions.length > 0 && (
         <div className="posbar">
-          {positions.map((p) => (
-            <button key={p.id} className={`poschip ${p.mint === mint ? "on" : ""}`} onClick={() => setMint(p.mint)}>
-              <span style={{ fontWeight: 700 }}>{p.symbol}</span>
-              <span className="num">{fmtSol(p.valueSol)}◎</span>
-              <span className={`num ${p.pnlPct >= 0 ? "pos" : "neg"}`}>
-                {p.pnlPct >= 0 ? "+" : ""}
-                {p.pnlPct.toFixed(1)}%
-              </span>
-            </button>
-          ))}
+          {positions.map((p) => {
+            const m = liveMark(p, marks.get(p.mint));
+            return (
+              <button key={p.id} className={`poschip ${p.mint === mint ? "on" : ""}`} onClick={() => setMint(p.mint)}>
+                <span style={{ fontWeight: 700 }}>{p.symbol}</span>
+                <span className="num">{fmtSol(m.valueSol)}◎</span>
+                <span className={`num ${m.pnlPct >= 0 ? "pos" : "neg"}`}>
+                  {m.pnlPct >= 0 ? "+" : ""}
+                  {m.pnlPct.toFixed(1)}%
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
 
       <div className="termgrid">
-        {/* ── left: chart + positions + orders ── */}
-        <div style={{ minWidth: 0 }}>
+        {/* ── chart ── */}
+        <div className="sg-head">
           <div className="panel panel-pad" style={{ marginBottom: 14 }}>
             <div className="tokhead" style={{ marginBottom: 10 }}>
               {info ? (
@@ -438,7 +553,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                   <span
                     className={`price ${priceFlash === "up" ? "flash-up" : priceFlash === "down" ? "flash-down" : ""}`}
                   >
-                    {fmtSubscriptPrice(info.priceUsd)}
+                    {fmtSubscriptPrice(livePriceUsd ?? info.priceUsd)}
                   </span>
                   {info.change24hPct !== undefined && (
                     <span className={`num ${(info.change24hPct ?? 0) >= 0 ? "pos" : "neg"}`}>
@@ -474,6 +589,37 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                     {t}
                   </button>
                 ))}
+              </div>
+              <div className="layermenu">
+                <button
+                  className={`chip ${layerMenu ? "on" : ""}`}
+                  onClick={() => setLayerMenu((v) => !v)}
+                  title="What the chart draws on top of the candles"
+                >
+                  Display {activeLayerCount > 0 && <span className="num">{activeLayerCount}</span>} ▾
+                </button>
+                {layerMenu && (
+                  <>
+                    {/* click-away catcher — a menu that only closes via its own
+                        button is the classic way to trap someone mid-trade */}
+                    <div className="layerscrim" onClick={() => setLayerMenu(false)} />
+                    <div className="layerpop">
+                      {CHART_LAYERS.map((l) => (
+                        <button
+                          key={l.id}
+                          className={`layeropt ${layers[l.id] ? "on" : ""}`}
+                          onClick={() => toggleLayer(l.id)}
+                        >
+                          <span className="box">{layers[l.id] ? "✓" : ""}</span>
+                          <span>
+                            <span className="lbl">{l.label}</span>
+                            <span className="hint">{l.hint}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "stretch", marginBottom: 10, flexWrap: "wrap" }}>
@@ -516,7 +662,10 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
               </div>
             )}
           </div>
+        </div>
 
+        {/* ── positions, tape, orders ── */}
+        <div className="sg-body">
           <div className="sectiontitle" style={{ marginTop: 0 }}>
             {vault ? `${vault.name} — open positions` : "Open positions"}
           </div>
@@ -535,7 +684,9 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {positions.map((p) => (
+                    {positions.map((p) => {
+                      const m = liveMark(p, marks.get(p.mint));
+                      return (
                       <tr key={p.id}>
                         <td>
                           <button
@@ -547,22 +698,22 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                           </button>
                           {p.markStale && <span className="pill stale" style={{ marginLeft: 6 }}>stale</span>}
                         </td>
-                        <td className="r num">{fmtSol(p.valueSol)} ◎</td>
+                        <td className="r num">{fmtSol(m.valueSol)} ◎</td>
                         <td className="r num">
-                          <span className={p.pnlSol >= 0 ? "pos" : "neg"}>
-                            {p.pnlSol >= 0 ? "+" : ""}
-                            {fmtSol(p.pnlSol)} ◎
+                          <span className={m.pnlSol >= 0 ? "pos" : "neg"}>
+                            {m.pnlSol >= 0 ? "+" : ""}
+                            {fmtSol(m.pnlSol)} ◎
                           </span>
                         </td>
                         <td className="r">
                           <button
                             className="btn ghost sm"
                             title="Sell exactly your initial cost — keep the rest as a free ride"
-                            disabled={!paper || busy || !vaultId || p.valueSol <= p.costSol}
+                            disabled={!paper || busy || !vaultId || m.valueSol <= p.costSol}
                             onClick={() => {
                               void (async () => {
                                 if (!vaultId) return;
-                                const frac = Math.min(0.999, p.costSol / p.valueSol);
+                                const frac = Math.min(0.999, p.costSol / m.valueSol);
                                 setBusy(true);
                                 try {
                                   const r = await api.trade(vaultId, { side: "sell", mint: p.mint, sellFraction: frac });
@@ -618,7 +769,8 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
                           ))}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -725,8 +877,9 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
           </div>
         </div>
 
-        {/* ── right: vault, trade, orders, trending ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* ── ticket rail: the right column on desktop; grid-template-areas
+             lifts it directly under the chart on narrow screens ── */}
+        <div className="sg-side" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div className="panel panel-pad">
             <div className="field" style={{ marginBottom: 8 }}>
               <label>Trading vault</label>

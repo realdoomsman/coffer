@@ -120,7 +120,7 @@ export function Portfolio() {
       toast(
         "good",
         r.fees && r.fees.profitSol > 0
-          ? `Paid ${fmtSol(r.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)} split 70/20/10 (trader ${fmtSol(r.fees.traderFeeSol)}, platform ${fmtSol(r.fees.platformFeeSol)})`
+          ? `Paid ${fmtSol(r.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)}, performance fee ${fmtSol(r.fees.perfFeeSol)} (trader ${fmtSol(r.fees.traderFeeSol)} now, ${fmtSol(r.fees.traderVestedSol)} vested)`
           : `Withdrawal paid: ${fmtSol(r.paidSol)} ◎ (worse-of rule, no profit → no fees)`,
       );
       const fresh = await api.portfolio();
@@ -180,7 +180,7 @@ export function Portfolio() {
           </div>
         ) : (
           <div className="tablewrap">
-            <table className="data">
+            <table className="data stack">
               <thead>
                 <tr>
                   <th>Vault</th>
@@ -194,21 +194,21 @@ export function Portfolio() {
               <tbody>
                 {view.holdings.map((h) => (
                   <tr key={h.vaultId}>
-                    <td>
+                    <td className="lead">
                       <Link to={`/vault/${h.vaultId}`}>{h.vaultName}</Link>{" "}
                       <TypePill type={h.vaultType} />
                     </td>
-                    <td className="r num dimtx">{fmtSol(h.shares)}</td>
-                    <td className="r num">{fmtSol(h.costSol)} ◎</td>
-                    <td className="r num">{fmtSol(h.valueSol)} ◎</td>
-                    <td className="r num">
+                    <td className="r num dimtx" data-label="Shares">{fmtSol(h.shares)}</td>
+                    <td className="r num" data-label="Cost">{fmtSol(h.costSol)} ◎</td>
+                    <td className="r num" data-label="Value">{fmtSol(h.valueSol)} ◎</td>
+                    <td className="r num" data-label="PnL">
                       <span className={h.pnlSol >= 0 ? "pos" : "neg"}>
                         {h.pnlSol >= 0 ? "+" : ""}
                         {fmtSol(h.pnlSol)} ◎
                       </span>{" "}
                       <Delta v={h.pnlPct} />
                     </td>
-                    <td className="r">
+                    <td className="r act">
                       <button
                         className="btn sm ghost"
                         disabled={sharing === h.vaultId}
@@ -232,7 +232,7 @@ export function Portfolio() {
           <div className="empty">Nothing pending</div>
         ) : (
           <div className="tablewrap">
-            <table className="data">
+            <table className="data stack">
               <thead>
                 <tr>
                   <th>Vault</th>
@@ -248,19 +248,19 @@ export function Portfolio() {
                   const ready = w.executableAt <= Date.now() / 1000;
                   return (
                     <tr key={w.id}>
-                      <td>
+                      <td className="lead">
                         <Link to={`/vault/${w.vaultId}`}>
                           {view.holdings.find((h) => h.vaultId === w.vaultId)?.vaultName ??
                             `${w.vaultId.slice(0, 8)}…`}
                         </Link>
                       </td>
-                      <td className="r num">{fmtSol(w.shares)}</td>
-                      <td className="r num">{fmtSol(w.valueAtRequestSol)} ◎</td>
-                      <td className="r num">
+                      <td className="r num" data-label="Shares">{fmtSol(w.shares)}</td>
+                      <td className="r num" data-label="Value at request">{fmtSol(w.valueAtRequestSol)} ◎</td>
+                      <td className="r num" data-label="Window">
                         {ready ? <span className="pos">ready</span> : countdown(w.executableAt)}
                       </td>
-                      <td className="r dimtx">worse-of</td>
-                      <td className="r">
+                      <td className="r dimtx" data-label="Payout rule">worse-of</td>
+                      <td className="r act">
                         <button
                           className="btn sm"
                           disabled={!ready || busy === w.id}
@@ -284,27 +284,12 @@ export function Portfolio() {
           aria-modal="true"
           aria-label={`Share card preview for ${share.vaultName}`}
           onClick={closeShare}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(10, 10, 8, 0.78)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 90,
-            padding: 20,
-          }}
+          className="modal-backdrop"
         >
           <div
-            className="panel"
+            className="modal-card"
             onClick={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: 640,
-              background: "var(--paper)",
-              border: "1px solid var(--line-bright)",
-              boxShadow: "10px 10px 0 rgba(0, 0, 0, 0.5)",
-              padding: 14,
-            }}
+            style={{ maxWidth: 640, background: "var(--paper)", padding: 14 }}
           >
             <div
               style={{
@@ -326,7 +311,7 @@ export function Portfolio() {
               alt={`PnL share card for ${share.vaultName}`}
               style={{ width: "100%", display: "block", border: "1px solid var(--line-2)" }}
             />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12, flexWrap: "wrap" }}>
               <button className="btn sm primary" onClick={() => downloadCard(share.url)}>
                 Download
               </button>

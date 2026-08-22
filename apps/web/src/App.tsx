@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, Link, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { fmtUsd } from "@coffer/shared";
 import { useAuth } from "./lib/auth";
 import { api } from "./lib/api";
@@ -31,6 +31,28 @@ function Nav({ to, hotkey, label, end }: { to: string; hotkey: string; label: st
   );
 }
 
+/** Primary destinations as a thumb-reachable bar; CSS hides it ≥861px. */
+const TABS: { to: string; label: string; ico: string }[] = [
+  { to: "/explore", label: "Explore", ico: "▦" },
+  { to: "/portfolio", label: "Portfolio", ico: "◧" },
+  { to: "/terminal", label: "Terminal", ico: "▶" },
+  { to: "/pulse", label: "Pulse", ico: "◈" },
+  { to: "/dashboard", label: "Vault", ico: "▣" },
+];
+
+function TabBar() {
+  return (
+    <nav className="tabbar" aria-label="Primary">
+      {TABS.map((t) => (
+        <NavLink key={t.to} to={t.to} className={({ isActive }) => (isActive ? "active" : "")}>
+          <span className="tico" aria-hidden="true">{t.ico}</span>
+          <span>{t.label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
 const HOTKEY_HELP: { key: string; label: string }[] = [
   { key: "E", label: "Explore vaults" },
   { key: "P", label: "Portfolio" },
@@ -54,13 +76,13 @@ function HotkeyHelp({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(10,10,8,0.82)", display: "grid", placeItems: "center", zIndex: 95 }}
-      onClick={onClose}
-    >
-      <div className="panel" style={{ width: 400, maxWidth: "92vw", boxShadow: "10px 10px 0 rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts">
-        <div className="mono" style={{ padding: "12px 18px", borderBottom: "1px solid var(--line-2)", color: "var(--amber)", fontWeight: 700, letterSpacing: "0.1em" }}>
-          // KEYBOARD
+    <div className="modal-backdrop" style={{ zIndex: 95 }} onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Keyboard shortcuts">
+        <div className="mono" style={{ padding: "12px 18px", borderBottom: "1px solid var(--line-2)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <span style={{ color: "var(--amber)", fontWeight: 700, letterSpacing: "0.1em" }}>// KEYBOARD</span>
+          <button className="drawerclose" style={{ display: "grid" }} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         <div style={{ padding: 16 }}>
           {HOTKEY_HELP.map((h) => (
@@ -97,7 +119,7 @@ function WatchPill() {
   const nav = useNavigate();
   if (shown.length === 0) return null;
   return (
-    <div style={{ display: "flex", gap: 6 }}>
+    <div className="watchpill" style={{ display: "flex", gap: 6 }}>
       {shown.map((w, i) => {
         const info = infos?.[i] ?? null;
         const ch = info?.change24hPct;
@@ -128,7 +150,7 @@ function SolPrice() {
   const flash = useFlash(meta?.solPriceUsd);
   if (!meta || meta.solPriceUsd <= 0) return null;
   return (
-    <div className="statusdot" title="SOL price (live)">
+    <div className="statusdot sol" title="SOL price (live)">
       <span
         className={`num ${flash === "up" ? "flash-up pos" : flash === "down" ? "flash-down neg" : ""}`}
         style={{ color: flash ? undefined : "var(--amber)" }}
@@ -144,7 +166,18 @@ export default function App() {
   const [apiUp, setApiUp] = useState<boolean | null>(null);
   const [depositOpen, setDepositOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const nav = useNavigate();
+  const loc = useLocation();
+
+  // a tap that navigates should also put the drawer away
+  useEffect(() => setNavOpen(false), [loc.pathname]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setNavOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -183,10 +216,15 @@ export default function App() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      {navOpen && <div className="navdrawer-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside className={`sidebar ${navOpen ? "open" : ""}`}>
         <Link to="/" className="brand">
           <span className="mark">C</span>
           <span className="word">coffer</span>
+          <span style={{ flex: 1 }} />
+          <button className="drawerclose" onClick={(e) => { e.preventDefault(); setNavOpen(false); }} aria-label="Close menu">
+            ✕
+          </button>
         </Link>
 
         <div className="navsec">Invest</div>
@@ -227,20 +265,28 @@ export default function App() {
 
       <div className="main">
         <div className="topbar">
+          <button
+            className="navtoggle"
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
+            onClick={() => setNavOpen((o) => !o)}
+          >
+            ☰
+          </button>
           <TokenSearchBox onPick={(r) => nav(`/token/${r.mint}`)} />
           <WatchPill />
           <div className="spacer" />
           <SolPrice />
-          <div className="statusdot" title="API connection">
+          <div className="statusdot api" title="API connection">
             <span className={`dot ${apiUp === false ? "down" : ""}`} />
-            {apiUp === null ? "connecting" : apiUp ? "api live" : "api down"}
+            <span className="lbl">{apiUp === null ? "connecting" : apiUp ? "api live" : "api down"}</span>
           </div>
-          <div className="statusdot" title="Network">
+          <div className="statusdot net" title="Network">
             <span className="dot" />
             devnet
           </div>
           <button
-            className="btn ghost sm"
+            className="btn ghost sm helpbtn"
             style={{ padding: "3px 9px" }}
             title="Keyboard shortcuts"
             onClick={() => setHelpOpen(true)}
@@ -255,6 +301,7 @@ export default function App() {
         </div>
         <ActivityWire />
       </div>
+      <TabBar />
     </div>
   );
 }

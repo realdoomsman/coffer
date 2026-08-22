@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fmtSol, type Vault } from "@coffer/shared";
+import { fmtSol, splitPerfFeeBps, VEST_LOCK_DAYS, type Vault } from "@coffer/shared";
 import { api } from "../lib/api";
 import { RealDepositPanel } from "./RealDepositPanel";
 
@@ -19,6 +19,7 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "green" | "red" | ""; text: string } | null>(null);
 
+  const { immediateBps, vestedBps } = splitPerfFeeBps(vault.perfFeeBps);
   const num = parseFloat(amount) || 0;
   const sharesOut = vault.sharePriceSol > 0 ? num / vault.sharePriceSol : 0;
   const instantOk = tab === "withdraw" && num <= vault.solBufferSol;
@@ -40,13 +41,13 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
                 tone: "green",
                 text: r.fees
                   ? r.fees.profitSol > 0
-                    ? `Paid ${fmtSol(r.fees.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)} split: trader ${fmtSol(r.fees.traderFeeSol)}, platform ${fmtSol(r.fees.platformFeeSol)}`
+                    ? `Paid ${fmtSol(r.fees.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)}, performance fee ${fmtSol(r.fees.perfFeeSol)} (trader gets ${fmtSol(r.fees.traderFeeSol)} now, ${fmtSol(r.fees.traderVestedSol)} vests in ${VEST_LOCK_DAYS} days)`
                     : `Paid ${fmtSol(r.fees.paidSol)} ◎ — no profit above your cost basis, so zero fees`
                   : `Instant withdrawal paid from SOL buffer`,
               }
             : {
                 tone: "",
-                text: `Withdrawal requested — executes after the ${vault.redeemWindowHours}h window at worse-of pricing; the 70/20/10 split applies to profit at execution`,
+                text: `Withdrawal requested — executes after the ${vault.redeemWindowHours}h window at worse-of pricing; the 70/30 split applies to profit at execution`,
               },
         );
       }
@@ -120,7 +121,9 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
         )}
         <div className="kv">
           <span className="k">Performance fee</span>
-          <span className="v">{(vault.perfFeeBps / 100).toFixed(0)}% of profit</span>
+          <span className="v" title={`${(immediateBps / 100).toFixed(0)}% paid to the trader at once, ${(vestedBps / 100).toFixed(0)}% held in escrow for ${VEST_LOCK_DAYS} days`}>
+            {(vault.perfFeeBps / 100).toFixed(0)}% of profit
+          </span>
         </div>
       </div>
 
@@ -134,7 +137,9 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
         Small exits pay instantly from the vault's cash. Big exits wait up to{" "}
         {vault.redeemWindowHours}h and pay whichever value is lower — when you asked or when it
         pays — so nobody games the queue at other depositors' expense. The trader can trade this
-        money but can never take it.
+        money but can never take it. You pay {(vault.perfFeeBps / 100).toFixed(0)}% of profit and
+        nothing else — a third of that fee is locked in escrow for {VEST_LOCK_DAYS} days, so a
+        trader who blows up can't walk off with all of it the same day.
       </p>
     </div>
   );
