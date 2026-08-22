@@ -49,6 +49,10 @@ pub enum VaultError {
     InsufficientSolBuffer,
     #[msg("Posted NAV too stale for an instant withdrawal")]
     NavTooStaleForInstant,
+    #[msg("Posted NAV is not stale enough to use the emergency withdrawal path")]
+    NavNotStaleEnough,
+    #[msg("No matured withdrawal request is unpayable; forced unwind is not available")]
+    SettlementNotOwed,
 
     // -- NAV keeper ---------------------------------------------------------
     #[msg("Signer is not the vault's NAV keeper")]

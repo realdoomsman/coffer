@@ -1,5 +1,6 @@
 //! Withdrawal family: request -> (redeem window) -> execute, plus
-//! instant_withdraw when the SOL buffer covers it, plus cancel.
+//! instant_withdraw when the SOL buffer covers it, plus cancel, plus the
+//! permissionless stale-NAV escape hatch emergency_withdraw.
 //!
 //! INVARIANT (custody): these are the ONLY instructions in the whole program
 //! that move lamports from the vault to a non-vault account, and the only
@@ -7,9 +8,14 @@
 //! for the performance fee crystallized by that same withdrawal.
 //!
 //! INVARIANT (liveness): nothing here checks VaultStatus or the platform kill
-//! switch. A frozen/closed/killed vault can always be withdrawn from. The only
-//! gate is NAV freshness (spec), and the platform can always restore freshness
-//! by rotating the NAV keeper (platform.rs::set_nav_keeper).
+//! switch. A frozen/closed/killed vault can always be withdrawn from. The
+//! normally priced paths additionally gate on NAV freshness (spec), and the
+//! platform can restore freshness by rotating the NAV keeper
+//! (platform.rs::set_nav_keeper) — but withdrawal ENTITLEMENT must not depend
+//! on anyone choosing to act, so `emergency_withdraw` opens once the mark has
+//! been stale for NAV_EMERGENCY_GRACE_SECONDS and needs no keeper, no admin
+//! and no trader. Between them, no combination of keeper, trader and platform
+//! inaction can hold a depositor's shares hostage.
 //!
 //! PROFIT-SHARE SCHEME (documented deviation from full-position Drift
 //! crystallization): fees are crystallized on the WITHDRAWN PORTION using its
@@ -384,6 +390,107 @@ pub fn handle_instant_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) -> R
         depositor: depositor.authority,
         instant: true,
         shares_burned: shares,
+        gross_lamports: gross,
+        payout_lamports: payout,
+        trader_fee_lamports: trader_fee,
+        platform_fee_lamports: platform_fee,
+    });
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// emergency_withdraw
+// ---------------------------------------------------------------------------
+
+/// PERMISSIONLESS stale-NAV escape hatch (review finding H1).
+///
+/// WHY: every other withdrawal path calls `assert_nav_fresh`. A keeper that
+/// stops posting — whether it died or the platform declines to rotate it —
+/// would otherwise freeze withdrawals forever, with a platform-gated
+/// `set_nav_keeper` as the only cure. That makes entitlement conditional on
+/// someone else's cooperation, which contradicts the whole custody model. This
+/// path removes that condition: after NAV_EMERGENCY_GRACE_SECONDS of silence
+/// the depositor redeems their OWN shares against the LAST POSTED mark, with
+/// no keeper, no admin, no trader and no status/kill-switch involvement of any
+/// kind (note the context carries no PlatformConfig and nothing below reads
+/// `vault.status` — that is deliberate and must stay that way).
+///
+/// WHY it is safe for everyone who stays: the price is a stale mark, so it is
+/// haircut by EMERGENCY_HAIRCUT_BPS before fees. The withheld lamports never
+/// leave the vault while the shares are fully burned, so remaining depositors
+/// are strictly better off per share; and since the haircut makes this path
+/// always worse than waiting for a fresh post, it can never be farmed as an
+/// arbitrage against a stale-high mark. Residual risk (accepted, and the
+/// reason for the long grace period): if the book actually lost more than the
+/// haircut since the last mark, an early exiter still leaves with too much —
+/// bounded by the fact that no fresh valuation exists to do better with.
+pub fn handle_emergency_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let vault_ai = ctx.accounts.vault.to_account_info();
+    let vault = &mut ctx.accounts.vault;
+    let depositor = &mut ctx.accounts.depositor;
+
+    // Same spend-once guard as instant_withdraw: a pending request has already
+    // reserved these shares' value on the vault, so burning them here too
+    // would double-spend. Nobody is trapped behind this — cancel is never NAV
+    // gated, so a depositor with a stranded request cancels and comes back.
+    require!(!depositor.has_pending_request(), VaultError::WithdrawRequestPending);
+    require!(shares > 0 && shares <= depositor.shares, VaultError::InsufficientShares);
+
+    // The ONLY gate on this path, and the exact mirror image of
+    // assert_nav_fresh: this exists BECAUSE the mark is abandoned, so it must
+    // never be reachable while the normally priced (unhaircut) paths are.
+    let nav_age = now.saturating_sub(vault.nav_posted_at);
+    require!(
+        nav_age >= NAV_EMERGENCY_GRACE_SECONDS,
+        VaultError::NavNotStaleEnough
+    );
+
+    // Priced on the last posted mark — by construction there is no fresh one.
+    // Same pricing function as every other path; NAV_EMERGENCY_GRACE_SECONDS
+    // is >= MAX_UNLOCK_PERIOD_SECONDS, so the locked-profit drip has always
+    // fully unlocked by now and this is simply nav_lamports.
+    let stale_nav = vault.nav_lamports; // captured for the event before settle
+    let equity = vault.effective_equity(now);
+    // ROUNDING: floor (vault's favor), as everywhere else.
+    let gross_before_haircut = math::value_for_shares(shares, vault.total_shares, equity)?;
+    // The haircut applies to the GROSS, before fee crystallization, so the
+    // trader and the platform are paid on the same reduced amount the
+    // depositor is. ROUNDING: floor of the RETAINED fraction rather than
+    // gross - floor(haircut), so the sub-lamport dust also stays with the pool
+    // (math.rs policy).
+    let gross = math::mul_bps_floor(gross_before_haircut, EMERGENCY_PAYOUT_BPS);
+    // Refuse a zero-value burn: the depositor would destroy shares for nothing
+    // (same guard request_withdraw applies to its own valuation).
+    require!(gross > 0, VaultError::InvalidParameter);
+
+    let is_trader = depositor.authority == vault.trader;
+    let (payout, trader_fee, platform_fee) =
+        settle_withdrawal(vault, depositor, shares, gross, is_trader)?;
+
+    // Same buffer discipline as every other payout: never the rent floor,
+    // never another depositor's reservation, never platform fees owed. If the
+    // buffer is short because the float is wrapped, sol_ops::settle_unwrap is
+    // the permissionless way to force it back (review finding H2).
+    let rent_min = Rent::get()?.minimum_balance(vault_ai.data_len());
+    let outflow = payout
+        .checked_add(trader_fee)
+        .ok_or(VaultError::MathOverflow)?;
+    require!(
+        vault.free_sol(vault_ai.lamports(), rent_min) >= outflow,
+        VaultError::InsufficientSolBuffer
+    );
+
+    pay_from_vault(&vault_ai, &ctx.accounts.authority.to_account_info(), payout)?;
+    pay_from_vault(&vault_ai, &ctx.accounts.trader.to_account_info(), trader_fee)?;
+
+    emit!(EmergencyWithdrawExecuted {
+        vault: vault.key(),
+        depositor: depositor.authority,
+        shares_burned: shares,
+        stale_nav_lamports: stale_nav,
+        nav_age_seconds: nav_age,
+        gross_before_haircut_lamports: gross_before_haircut,
         gross_lamports: gross,
         payout_lamports: payout,
         trader_fee_lamports: trader_fee,

@@ -11,21 +11,30 @@
 //! as such in review:
 //!
 //!   1. execute_withdraw / instant_withdraw  -> withdrawing depositor
-//!                                            + crystallized perf fee to the
+//!      / emergency_withdraw                  + crystallized perf fee to the
 //!                                              vault's trader (from proceeds)
 //!   2. collect_platform_fees                -> the seed-pinned Treasury PDA
 //!                                              (amount fixed by accounting,
 //!                                              destination fixed by seeds)
 //!
 //! Everything else is an inflow (init_vault seed, deposit) or vault-to-vault
-//! (wrap_sol, unwrap_sol, close_empty_ata, execute_swap between vault-owned
-//! token accounts). sweep_treasury moves platform revenue, not vault assets.
-//! close_depositor returns the depositor record's own rent to the depositor.
+//! (wrap_sol, unwrap_sol, settle_unwrap, close_empty_ata, execute_swap between
+//! vault-owned token accounts). sweep_treasury moves platform revenue, not
+//! vault assets. close_depositor returns the depositor record's own rent to
+//! the depositor.
 //!
-//! LIVENESS INVARIANT: no instruction can block withdrawals. VaultStatus and
-//! the platform kill switch gate trading and deposits only; the withdrawal
-//! path is gated solely by NAV freshness, and the platform can always restore
-//! freshness by rotating the NAV keeper (set_nav_keeper).
+//! LIVENESS INVARIANT: no instruction can block withdrawals — and neither can
+//! any ACTOR: not the trader, not the keeper, not the platform. VaultStatus
+//! and the platform kill switch gate trading and deposits only. The normally
+//! priced withdrawal paths are gated solely by NAV freshness, which the
+//! platform can restore by rotating the NAV keeper (set_nav_keeper); two
+//! permissionless paths then guarantee the promise holds even when nobody
+//! cooperates at all:
+//!   - emergency_withdraw — after NAV_EMERGENCY_GRACE_SECONDS of keeper
+//!     silence, a depositor redeems against the last posted mark less
+//!     EMERGENCY_HAIRCUT_BPS, with no keeper, admin or trader involvement.
+//!   - settle_unwrap — once a matured request is unpayable, ANYONE may push
+//!     the vault's wSOL float back into the vault so that it can be paid.
 //!
 //! The three audit surfaces (see README.md):
 //!   #1 share-math rounding  -> math.rs
@@ -160,6 +169,14 @@ pub mod vault {
         handle_instant_withdraw(ctx, shares)
     }
 
+    /// Permissionless escape hatch for an abandoned NAV keeper: after
+    /// NAV_EMERGENCY_GRACE_SECONDS with no post, the depositor redeems their
+    /// own shares against the LAST posted mark less EMERGENCY_HAIRCUT_BPS.
+    /// Reads no status and no kill switch — entitlement is unconditional.
+    pub fn emergency_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) -> Result<()> {
+        handle_emergency_withdraw(ctx, shares)
+    }
+
     /// Reclaim the rent of an emptied depositor record.
     pub fn close_depositor(ctx: Context<CloseDepositor>) -> Result<()> {
         handle_close_depositor(ctx)
@@ -186,6 +203,13 @@ pub mod vault {
     /// Close the vault wSOL account back into vault SOL (always allowed).
     pub fn unwrap_sol(ctx: Context<UnwrapSol>) -> Result<()> {
         handle_unwrap_sol(ctx)
+    }
+
+    /// Permissionless forced unwind: anyone may return the wSOL float to the
+    /// vault once a MATURED withdrawal request cannot be paid out of the
+    /// vault's spendable lamports. Vault-to-vault only.
+    pub fn settle_unwrap(ctx: Context<SettleUnwrap>) -> Result<()> {
+        handle_settle_unwrap(ctx)
     }
 
     /// Rent reclamation for zero-balance vault token accounts.

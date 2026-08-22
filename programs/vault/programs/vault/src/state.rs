@@ -145,7 +145,8 @@ pub enum VaultStatus {
     /// Trading (and new deposits) disabled. Withdrawals ALWAYS keep working —
     /// no instruction in this program checks Frozen/Closed on the withdrawal
     /// path (only NAV freshness, which the platform can restore by rotating
-    /// the keeper).
+    /// the keeper, and which `emergency_withdraw` bypasses entirely after
+    /// NAV_EMERGENCY_GRACE_SECONDS so entitlement never depends on anyone).
     Frozen,
     /// Terminal: trading and deposits permanently disabled, withdrawals only.
     Closed,
@@ -438,6 +439,38 @@ pub struct WithdrawExecuted {
     pub payout_lamports: u64,
     pub trader_fee_lamports: u64,
     pub platform_fee_lamports: u64,
+}
+
+/// Emitted by the permissionless stale-NAV escape hatch. Kept separate from
+/// `WithdrawExecuted` so indexers can never mistake an emergency exit (priced
+/// on an abandoned mark, haircut applied) for a normally priced withdrawal.
+#[event]
+pub struct EmergencyWithdrawExecuted {
+    pub vault: Pubkey,
+    pub depositor: Pubkey,
+    pub shares_burned: u128,
+    /// The stale mark the redemption was priced against, and its age.
+    pub stale_nav_lamports: u64,
+    pub nav_age_seconds: i64,
+    /// Value of the shares at the stale mark, before EMERGENCY_HAIRCUT_BPS.
+    pub gross_before_haircut_lamports: u64,
+    /// After the haircut; this is what fees were crystallized on.
+    pub gross_lamports: u64,
+    pub payout_lamports: u64,
+    pub trader_fee_lamports: u64,
+    pub platform_fee_lamports: u64,
+}
+
+/// Emitted by the permissionless forced unwind (`settle_unwrap`).
+#[event]
+pub struct SettlementUnwrapped {
+    pub vault: Pubkey,
+    /// Lamports the closed wSOL account returned to the vault (wrapped
+    /// balance + that account's rent).
+    pub unwrapped_lamports: u64,
+    /// How far the vault was short of its pending withdrawal reservations at
+    /// the moment settlement was forced.
+    pub shortfall_lamports: u64,
 }
 
 #[event]
