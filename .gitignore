@@ -10,3 +10,8 @@ apps/api/prisma/dev.db-journal
 target/
 .anchor/
 test-ledger/
+
+# ── key material: NEVER commit ──────────────────────────────────────
+*keypair*.json
+**/target/deploy/*.json
+.config/solana/
