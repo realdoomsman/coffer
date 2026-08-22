@@ -4,6 +4,7 @@ import { fmtPct, fmtSol, type Vault } from "@coffer/shared";
 import { api } from "../lib/api";
 import { usePageTitle } from "../lib/hooks";
 import { CountStat, Sparkline, TypePill } from "../components/bits";
+import { AnimatedCard, AnimatedCounter } from "../components/AnimatedComponents";
 
 export function Landing() {
   usePageTitle("");
@@ -125,8 +126,8 @@ export function Landing() {
             </div>
           )}
           <div className="vaultgrid">
-            {best.slice(0, 3).map((v) => (
-              <Link key={v.id} to={`/vault/${v.id}`} className="vcard">
+            {best.slice(0, 3).map((v, index) => (
+              <AnimatedCard key={v.id} hover={true} glow={true} delay={index * 100}>
                 <div className="head">
                   <div>
                     <div className="name">{v.name}</div>
@@ -139,7 +140,11 @@ export function Landing() {
                 <div className="metric-row">
                   <div>
                     <div className={`bignum ${v.stats.pnlPct30d >= 0 ? "pos" : "neg"}`}>
-                      {fmtPct(v.stats.pnlPct30d, 1)}
+                      <AnimatedCounter
+                        value={v.stats.pnlPct30d}
+                        formatFn={(n) => fmtPct(n, 1)}
+                        duration={1000}
+                      />
                     </div>
                     <div className="dimtx mono" style={{ fontSize: 11 }}>30d return</div>
                   </div>
@@ -150,7 +155,7 @@ export function Landing() {
                   <span>{v.stats.depositorCount} depositors</span>
                   <span>mgr {v.managerStakePct.toFixed(0)}%</span>
                 </div>
-              </Link>
+              </AnimatedCard>
             ))}
           </div>
         </section>

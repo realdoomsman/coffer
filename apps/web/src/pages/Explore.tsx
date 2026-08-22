@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { VaultCard } from "../components/VaultCard";
 import { CountStat, Delta, Skeleton, TypePill } from "../components/bits";
 import { usePageTitle, usePoll } from "../lib/hooks";
-import { AnimatedCard, AnimatedBadge, Skeleton as AnimatedSkeleton } from "../components/AnimatedComponents";
+import { AnimatedCard, AnimatedBadge } from "../components/AnimatedComponents";
 
 type TypeFilter = "all" | "managed" | "mirror";
 type Sort = "pnl30d" | "tvl" | "age" | "drawdown";
@@ -27,12 +27,12 @@ export function Explore() {
   const [guideDismissed, setGuideDismissed] = useState(
     () => localStorage.getItem("coffer.guide.dismissed") === "1",
   );
-  
+
   function dismissGuide() {
     localStorage.setItem("coffer.guide.dismissed", "1");
     setGuideDismissed(true);
   }
-  
+
   // the main board is real vaults only — paper lives in its own sandbox
   const { data: vaults, error } = usePoll<Vault[]>(() => api.vaults({ mode: "real" }), 15_000, []);
 
@@ -77,14 +77,14 @@ export function Explore() {
           </div>
         </div>
         <div className="viewtoggle">
-          <button 
-            className={view === "cards" ? "on" : ""} 
+          <button
+            className={view === "cards" ? "on" : ""}
             onClick={() => setView("cards")}
           >
             Cards
           </button>
-          <button 
-            className={view === "table" ? "on" : ""} 
+          <button
+            className={view === "table" ? "on" : ""}
             onClick={() => setView("table")}
           >
             Board
@@ -94,18 +94,18 @@ export function Explore() {
 
       {!guideDismissed && (
         <AnimatedCard className="animate-in fade-in slide-in-from-top-2 duration-500" glow={false}>
-          <div className="mono" style={{ 
-            padding: "10px 16px", 
-            borderBottom: "1px solid var(--line)", 
-            display: "flex", 
-            justifyContent: "space-between", 
-            alignItems: "center" 
+          <div className="mono" style={{
+            padding: "10px 16px",
+            borderBottom: "1px solid var(--line)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
           }}>
             <span style={{ color: "var(--amber)", fontSize: 11, letterSpacing: "0.16em" }}>
               // START HERE
             </span>
-            <button 
-              onClick={dismissGuide} 
+            <button
+              onClick={dismissGuide}
               style={{ background: "none", border: "none", color: "var(--dim)", cursor: "pointer" }}
               aria-label="Dismiss guide"
             >
@@ -153,15 +153,15 @@ export function Explore() {
         </div>
       )}
 
-      <div 
+      <div
         className="animate-in fade-in slide-in-from-top-2 duration-500"
         style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}
       >
         <div className="chipsrow">
           {(["all", "managed", "mirror"] as const).map((t) => (
-            <button 
-              key={t} 
-              className={`chip ${type === t ? "on" : ""}`} 
+            <button
+              key={t}
+              className={`chip ${type === t ? "on" : ""}`}
               onClick={() => setType(t)}
             >
               {t}
@@ -170,9 +170,9 @@ export function Explore() {
         </div>
         <div className="chipsrow">
           {SORTS.map((s) => (
-            <button 
-              key={s.id} 
-              className={`chip ${sort === s.id ? "on" : ""}`} 
+            <button
+              key={s.id}
+              className={`chip ${sort === s.id ? "on" : ""}`}
               onClick={() => setSort(s.id)}
             >
               {s.label}
@@ -186,16 +186,13 @@ export function Explore() {
           API unreachable: {error}. Start it with <code>npm run dev:api</code>.
         </div>
       )}
-      
+
       {!vaults && !error && (
         <div className="vaultgrid animate-in fade-in duration-300">
           {Array.from({ length: 6 }, (_, i) => (
-            <AnimatedSkeleton 
-              key={i} 
-              height={200} 
-              variant="rectangular"
-              className="rounded-2xl"
-            />
+            <AnimatedCard key={i} hover={false} glow={false} delay={i * 50}>
+              <Skeleton height={200} variant="rectangular" />
+            </AnimatedCard>
           ))}
         </div>
       )}
@@ -241,11 +238,11 @@ export function Explore() {
                   <tr
                     key={v.id}
                     onClick={() => nav(`/vault/${v.id}`)}
-                    style={{ 
+                    style={{
                       cursor: "pointer",
                       animationDelay: `${i * 50}ms`,
                     }}
-                    className="animate-in fade-in slide-in-from-left-2 duration-300 hover:bg-blue-500/5"
+                    className="animate-in fade-in slide-in-from-left-2 duration-300 hover:bg-[var(--amber-dim)]"
                   >
                     <td className={`rank num hide-sm ${i < 3 && sort === "pnl30d" ? "medal" : ""}`}>
                       {String(i + 1).padStart(2, "0")}
