@@ -37,6 +37,32 @@ const FEE_RESERVE_SOL = 0.000_02;
 
 type Step = "idle" | "signing" | "confirming" | "done";
 
+/** Wait for a signature to reach `confirmed`, over HTTP only. */
+async function pollConfirmed(connection: Connection, signature: string): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  for (;;) {
+    const { value } = await connection.getSignatureStatuses([signature]);
+    const status = value[0];
+    if (status?.err) {
+      throw new Error(`transaction failed on chain: ${JSON.stringify(status.err)}`);
+    }
+    if (
+      status?.confirmationStatus === "confirmed" ||
+      status?.confirmationStatus === "finalized"
+    ) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      // The signature is real and already shown; a slow cluster is not a
+      // failed send, and saying otherwise would be the worse error.
+      throw new Error(
+        "still unconfirmed after 90s - check the signature on Solscan before retrying",
+      );
+    }
+    await new Promise((r) => setTimeout(r, 1_500));
+  }
+}
+
 export function SendSolPanel({ onSent }: { onSent?: () => void }) {
   const { wallet } = useAuth();
 
@@ -125,7 +151,11 @@ export function SendSolPanel({ onSent }: { onSent?: () => void }) {
       setSignature(sig);
 
       setStep("confirming");
-      await connection.confirmTransaction(sig, "confirmed");
+      // Poll rather than `confirmTransaction`: that opens a websocket
+      // subscription, and the browser's RPC is a same-origin HTTP proxy with
+      // no websocket behind it. getSignatureStatuses is plain HTTP and says
+      // the same thing.
+      await pollConfirmed(connection, sig);
       setStep("done");
       setAmount("");
       void loadBalance();

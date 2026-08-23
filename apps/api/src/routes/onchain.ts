@@ -114,26 +114,72 @@ export function isMainnetCluster(): boolean {
 }
 
 /**
- * Public RPC endpoint the BROWSER should use. Deliberately not
- * `env.solanaRpcUrl`: that may carry an API key in its path, and this
- * value is served to anyone. An operator who wants the browser on a
- * specific endpoint sets PUBLIC_SOLANA_RPC_URL explicitly.
+ * RPC endpoint the BROWSER should use.
+ *
+ * Deliberately not `env.solanaRpcUrl`: that carries an API key in its path
+ * and this value is served to anyone. It used to fall back to Solana's own
+ * public endpoints, which was worse than useless — `api.mainnet-beta.solana.com`
+ * answers browser-origin requests with `403 Access forbidden`, so every
+ * user-signed transaction died at `getLatestBlockhash` before it was ever
+ * built. The failure surfaced as "failed to get recent blockhash: 403" with
+ * no indication that the endpoint, not the wallet, was the problem.
+ *
+ * The default is now our own proxy below, which keeps the key server-side
+ * and is same-origin for the browser. An operator with a browser-safe
+ * endpoint (a domain-restricted Helius key, say) can still bypass it with
+ * PUBLIC_SOLANA_RPC_URL.
  */
-function publicRpcUrl(): string {
+function publicRpcUrl(req?: { protocol: string; get(name: string): string | undefined }): string {
   const explicit = (process.env.PUBLIC_SOLANA_RPC_URL || "").trim();
   if (explicit) return explicit;
-  switch (cluster()) {
-    case "mainnet":
-    case "mainnet-beta":
-      return "https://api.mainnet-beta.solana.com";
-    case "testnet":
-      return "https://api.testnet.solana.com";
-    case "localnet":
-      return "http://127.0.0.1:8899";
-    default:
-      return "https://api.devnet.solana.com";
+  const base = (process.env.PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "");
+  if (base) return `${base}/api/onchain/rpc`;
+  if (req) {
+    const host = req.get("host");
+    if (host) {
+      // Behind Railway's proxy the client speaks https even though express
+      // sees http; trust the forwarded proto when there is one.
+      const proto = req.get("x-forwarded-proto")?.split(",")[0]?.trim() || req.protocol;
+      return `${proto}://${host}/api/onchain/rpc`;
+    }
   }
+  return "/api/onchain/rpc";
 }
+
+/**
+ * JSON-RPC methods the browser proxy will forward.
+ *
+ * An allowlist rather than a passthrough: this endpoint is unauthenticated
+ * (it has to be — it is what a wallet talks to before anyone is signed in)
+ * and it spends our RPC quota, so it forwards exactly what a `Connection`
+ * needs to read state, price a fee and broadcast a signed transaction, and
+ * nothing else. Everything here is either a read or the submission of bytes
+ * the user already signed; none of it can move funds on its own.
+ */
+const RPC_METHOD_ALLOWLIST = new Set([
+  "getAccountInfo",
+  "getBalance",
+  "getBlockHeight",
+  "getEpochInfo",
+  "getFeeForMessage",
+  "getLatestBlockhash",
+  "getMinimumBalanceForRentExemption",
+  "getMultipleAccounts",
+  "getRecentPrioritizationFees",
+  "getSignatureStatuses",
+  "getSignaturesForAddress",
+  "getSlot",
+  "getTokenAccountBalance",
+  "getTokenAccountsByOwner",
+  "getTransaction",
+  "getVersion",
+  "isBlockhashValid",
+  "sendTransaction",
+  "simulateTransaction",
+]);
+
+/** Largest proxied request body. A signed transaction is ~1.2 kB base64. */
+const RPC_MAX_BODY_BYTES = 64 * 1024;
 
 // rent is a cluster constant; one RPC call per process is plenty
 let cachedRent: bigint | null = null;
@@ -260,6 +306,61 @@ async function loadRealVault(
 // Public. Everything the browser needs to talk to the same chain we do —
 // minus anything secret (never the server's own RPC URL, which may carry
 // an API key).
+/**
+ * Same-origin JSON-RPC proxy for the browser.
+ *
+ * Forwards an allowlisted method to the server's configured RPC and returns
+ * the response verbatim. The API key stays here; the browser never sees it.
+ * Batch requests (web3.js sends them) are accepted as long as EVERY method
+ * in the batch is allowlisted.
+ */
+onchainRouter.post("/rpc", async (req, res) => {
+  const body: unknown = req.body;
+  const calls = Array.isArray(body) ? body : [body];
+  if (calls.length === 0 || calls.length > 20) {
+    res.status(400).json({ error: "bad_batch" });
+    return;
+  }
+  for (const call of calls) {
+    const method = (call as { method?: unknown })?.method;
+    if (typeof method !== "string" || !RPC_METHOD_ALLOWLIST.has(method)) {
+      res.status(403).json({
+        jsonrpc: "2.0",
+        id: (call as { id?: unknown })?.id ?? null,
+        error: { code: -32601, message: `method not proxied: ${String(method)}` },
+      });
+      return;
+    }
+  }
+
+  const payload = JSON.stringify(body);
+  if (Buffer.byteLength(payload) > RPC_MAX_BODY_BYTES) {
+    res.status(413).json({ error: "body_too_large" });
+    return;
+  }
+
+  try {
+    const upstream = await fetch(env.solanaRpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: payload,
+      signal: AbortSignal.timeout(20_000),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status).type("application/json").send(text);
+  } catch (err) {
+    // Never surface the upstream URL: it carries the API key.
+    res.status(502).json({
+      jsonrpc: "2.0",
+      id: null,
+      error: {
+        code: -32603,
+        message: `rpc upstream unavailable: ${err instanceof Error ? err.name : "error"}`,
+      },
+    });
+  }
+});
+
 onchainRouter.get("/config", async (_req, res, next) => {
   try {
     let rent: string | null = null;
@@ -276,7 +377,7 @@ onchainRouter.get("/config", async (_req, res, next) => {
       mainnetRefused: false,
       privyConfigured: privyConfigured(),
       programId: VAULT_PROGRAM_ID.toBase58(),
-      rpcUrl: publicRpcUrl(),
+      rpcUrl: publicRpcUrl(_req),
       minDepositLamports: MIN_DEPOSIT_LAMPORTS.toString(),
       maxDepositSol: maxDepositSol(),
       depositorRentLamports: rent,
@@ -501,7 +602,7 @@ onchainRouter.post("/deposit/prepare", async (req, res, next) => {
       blockhash,
       lastValidBlockHeight,
       cluster: cluster(),
-      rpcUrl: publicRpcUrl(),
+      rpcUrl: publicRpcUrl(req),
       instructions: ixs.map((ix, i) => ({
         index: i,
         programId: ix.programId.toBase58(),
