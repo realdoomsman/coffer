@@ -135,6 +135,14 @@ export const env = {
    * ~/.config/solana/id.json, resolved in signer.ts so this getter stays
    * a pure string read.
    */
+  /**
+   * The server keypair inline, as a JSON byte array. Railway has no
+   * persistent filesystem to hold a key file, so this is how production
+   * gets one at all.
+   */
+  get solanaKeypairJson(): string {
+    return str("SOLANA_KEYPAIR_JSON", "");
+  },
   get solanaKeypairPath(): string {
     return str("SOLANA_KEYPAIR_PATH", str("SOLANA_KEYPAIR", ""));
   },

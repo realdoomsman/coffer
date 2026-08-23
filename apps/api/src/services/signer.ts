@@ -50,6 +50,42 @@ export function defaultKeypairPath(): string {
   return env.solanaKeypairPath || join(homedir(), ".config", "solana", "id.json");
 }
 
+/**
+ * Parse a keypair from a JSON byte array, wherever it came from.
+ */
+function keypairFromBytes(raw: string, source: string): Keypair {
+  let bytes: number[];
+  try {
+    bytes = JSON.parse(raw) as number[];
+  } catch {
+    throw new Error(`keypair from ${source} is not a JSON byte array`);
+  }
+  if (!Array.isArray(bytes) || (bytes.length !== 64 && bytes.length !== 32)) {
+    throw new Error(`keypair from ${source} must be a 64-byte (or 32-byte seed) JSON array`);
+  }
+  return bytes.length === 64
+    ? Keypair.fromSecretKey(Uint8Array.from(bytes))
+    : Keypair.fromSeed(Uint8Array.from(bytes));
+}
+
+/**
+ * The key as an environment variable rather than a file.
+ *
+ * This is why no vault has ever existed on-chain. The loader only read from
+ * disk, Railway containers have no persistent filesystem to put a key on, so
+ * SOLANA_KEYPAIR_PATH was never set in production — and init_vault takes the
+ * "missing server keypair" branch that leaves the row off-chain and says so
+ * in a log nobody reads. Every "real" vault is a database row with
+ * onchainVaultPda = null.
+ *
+ * Checked before the file path so a deployed key always wins.
+ */
+export function keypairFromEnv(): Keypair | null {
+  const raw = env.solanaKeypairJson;
+  if (!raw) return null;
+  return keypairFromBytes(raw.trim(), "SOLANA_KEYPAIR_JSON");
+}
+
 export function keypairFromFile(path: string): Keypair {
   let raw: string;
   try {
@@ -60,25 +96,17 @@ export function keypairFromFile(path: string): Keypair {
         "set SOLANA_KEYPAIR_PATH or create one with `solana-keygen new`",
     );
   }
-  let bytes: number[];
-  try {
-    bytes = JSON.parse(raw) as number[];
-  } catch {
-    throw new Error(`keypair at ${path} is not a JSON byte array`);
-  }
-  if (!Array.isArray(bytes) || (bytes.length !== 64 && bytes.length !== 32)) {
-    throw new Error(`keypair at ${path} must be a 64-byte (or 32-byte seed) JSON array`);
-  }
-  return bytes.length === 64
-    ? Keypair.fromSecretKey(Uint8Array.from(bytes))
-    : Keypair.fromSeed(Uint8Array.from(bytes));
+  return keypairFromBytes(raw, path);
 }
 
 let cachedSigner: Keypair | null = null;
 
 /** The server keypair. Throws (with the path) when it cannot be loaded. */
 export function getServerKeypair(): Keypair {
-  if (!cachedSigner) cachedSigner = keypairFromFile(defaultKeypairPath());
+  if (!cachedSigner) {
+    // env first: a deployed key must win over whatever happens to be on disk
+    cachedSigner = keypairFromEnv() ?? keypairFromFile(defaultKeypairPath());
+  }
   return cachedSigner;
 }
 
