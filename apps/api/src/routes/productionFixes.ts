@@ -9,14 +9,15 @@ productionFixesRouter.get('/meta', async (_req, res) => {
   try {
     // Get fresh data from database
     const [vaultsCount, totalTvl] = await Promise.all([
-      prisma.vault.count(),
+      prisma.vault.count({ where: { status: 'active', mode: 'real' } }),
       prisma.vault.aggregate({
-        _sum: { tvl: true }
+        where: { status: 'active', mode: 'real' },
+        _sum: { tvlSol: true }
       })
     ]);
 
     const meta = {
-      tvlSol: totalTvl._sum.tvl || 0,
+      tvlSol: totalTvl._sum.tvlSol || 0,
       vaults: vaultsCount,
       timestamp: new Date().toISOString()
     };
@@ -37,40 +38,41 @@ productionFixesRouter.get('/leaderboards/traders', async (req, res) => {
     const offsetNum = parseInt(offset as string);
 
     // Get traders with performance metrics
-    const traders = await prisma.trader.findMany({
+    const users = await prisma.user.findMany({
       include: {
         _count: {
           select: { vaults: true }
         },
         vaults: {
+          where: { status: 'active' },
           select: {
-            tvl: true,
-            totalPnl: true,
-            totalPnlPercent: true
+            tvlSol: true,
+            traderFeesAccruedSol: true,
+            vestedFeesAccruedSol: true
           }
         }
       },
       skip: offsetNum,
       take: limitNum,
       orderBy: {
-        [sort as string]: 'desc'
+        id: 'desc'
       }
     });
 
     // Calculate additional metrics
-    const tradersWithMetrics = traders.map(trader => {
-      const totalTvl = trader.vaults.reduce((sum, v) => sum + (v.tvl || 0), 0);
-      const totalPnl = trader.vaults.reduce((sum, v) => sum + (v.totalPnl || 0), 0);
-      const avgPnlPercent = trader.vaults.length > 0 
-        ? trader.vaults.reduce((sum, v) => sum + (v.totalPnlPercent || 0), 0) / trader.vaults.length
-        : 0;
+    const tradersWithMetrics = users.map(user => {
+      const totalTvl = user.vaults.reduce((sum, v) => sum + (v.tvlSol || 0), 0);
+      const totalFees = user.vaults.reduce((sum, v) => sum + (v.traderFeesAccruedSol || 0) + (v.vestedFeesAccruedSol || 0), 0);
 
       return {
-        ...trader,
+        id: user.id,
+        handle: user.handle,
+        displayName: user.displayName,
+        xHandle: user.xHandle,
+        xVerified: user.xVerified,
         totalTvl,
-        totalPnl,
-        avgPnlPercent,
-        vaultsCount: trader._count.vaults
+        totalFees,
+        vaultsCount: user._count.vaults
       };
     });
 
@@ -96,13 +98,21 @@ productionFixesRouter.get('/leaderboards/vaults', async (req, res) => {
     const limitNum = Math.min(parseInt(limit as string), 100);
     const offsetNum = parseInt(offset as string);
 
+    const orderByMap: Record<string, any> = {
+      tvl: { tvlSol: 'desc' },
+      fees: { traderFeesAccruedSol: 'desc' },
+      shares: { totalShares: 'desc' },
+    };
+
+    const orderBy = orderByMap[sort as string] || orderByMap.tvl;
+
     const vaults = await prisma.vault.findMany({
       include: {
         trader: {
           select: {
             id: true,
-            name: true,
-            avatar: true,
+            handle: true,
+            displayName: true,
             xHandle: true,
             xVerified: true
           }
@@ -111,11 +121,10 @@ productionFixesRouter.get('/leaderboards/vaults', async (req, res) => {
           select: { positions: true }
         }
       },
+      where: { status: 'active' },
       skip: offsetNum,
       take: limitNum,
-      orderBy: {
-        [sort as string]: 'desc'
-      }
+      orderBy,
     });
 
     res.json({

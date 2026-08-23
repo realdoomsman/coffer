@@ -129,29 +129,15 @@ async function getTraderLeaderboard(params: {
   const { limit, offset, sort } = params;
   
   // Get traders with active vaults
-  const traders = await prisma.user.findMany({
+  const users = await prisma.user.findMany({
     where: {
       vaults: {
         some: { status: "active" },
       },
     },
-    select: {
-      id: true,
-      handle: true,
-      displayName: true,
-      xHandle: true,
-      xVerified: true,
-      createdAt: true,
+    include: {
       vaults: {
         where: { status: "active" },
-        select: {
-          id: true,
-          name: true,
-          mode: true,
-          tvlSol: true,
-          sharePriceSol: true,
-          totalShares: true,
-        },
       },
     },
     take: limit,
@@ -159,14 +145,27 @@ async function getTraderLeaderboard(params: {
   });
 
   // Calculate stats for each trader
-  const tradersWithStats = traders.map(trader => {
-    const totalTvlsol = trader.vaults.reduce((sum: number, v: any) => sum + v.tvlSol, 0);
-    const activeVaults = trader.vaults.length;
+  const tradersWithStats = users.map(user => {
+    const totalTvlsol = user.vaults.reduce((sum: number, v: any) => sum + (v.tvlSol || 0), 0);
+    const activeVaults = user.vaults.length;
     
     return {
-      ...trader,
+      id: user.id,
+      handle: user.handle,
+      displayName: user.displayName,
+      xHandle: user.xHandle,
+      xVerified: user.xVerified,
+      createdAt: user.createdAt,
       totalTvlsol,
       activeVaults,
+      vaults: user.vaults.map(v => ({
+        id: v.id,
+        name: v.name,
+        mode: v.mode,
+        tvlSol: v.tvlSol,
+        sharePriceSol: v.sharePriceSol,
+        totalShares: v.totalShares,
+      })),
     };
   });
 
