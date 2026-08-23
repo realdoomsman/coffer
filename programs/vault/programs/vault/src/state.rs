@@ -30,7 +30,11 @@ pub const VAULT_DEPOSITOR_SEED: &[u8] = b"vault_depositor";
 /// realloc instruction, so the new layout needs a new address. The v1 account
 /// is inert - nothing in this build derives it.
 pub const PLATFORM_CONFIG_SEED: &[u8] = b"platform_config_v2";
-pub const TREASURY_SEED: &[u8] = b"treasury";
+/// v2, for the same reason as PLATFORM_CONFIG_SEED: `init_platform` creates
+/// both accounts with `init`, so a surviving v1 treasury makes the whole
+/// bootstrap fail "already in use". The v1 treasury is inert — the platform
+/// takes 0% of profit, so nothing has ever accrued to it.
+pub const TREASURY_SEED: &[u8] = b"treasury_v2";
 
 // ---------------------------------------------------------------------------
 // Pinned external programs / mints

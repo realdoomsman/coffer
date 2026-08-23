@@ -47,8 +47,13 @@ export const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111
 
 export const VAULT_SEED = Buffer.from("vault");
 export const VAULT_DEPOSITOR_SEED = Buffer.from("vault_depositor");
-export const PLATFORM_CONFIG_SEED = Buffer.from("platform_config");
-export const TREASURY_SEED = Buffer.from("treasury");
+/**
+ * v2: PlatformConfig gained nav_keeper, pending_admin and padding, and an
+ * allocated PDA cannot grow. Must match state.rs::PLATFORM_CONFIG_SEED.
+ */
+export const PLATFORM_CONFIG_SEED = Buffer.from("platform_config_v2");
+/** v2 — see state.rs::TREASURY_SEED. */
+export const TREASURY_SEED = Buffer.from("treasury_v2");
 
 // ── economic constants (state.rs) — mirrored so the API can validate
 // before spending a transaction fee on a guaranteed revert ───────────
@@ -59,6 +64,20 @@ export const MAX_PERF_FEE_BPS = 3_000;
 export const MIN_NAV_STALENESS_SECONDS = 60;
 export const MAX_NAV_STALENESS_SECONDS = 86_400;
 export const MAX_REDEEM_WINDOW_SECONDS = 30 * 86_400;
+/** state.rs::MIN_REDEEM_WINDOW_SECONDS - a zero window is an instant withdraw. */
+export const MIN_REDEEM_WINDOW_SECONDS = 60 * 60;
+/** state.rs::MIN_UNLOCK_PERIOD_SECONDS - the drip may not be switched off. */
+export const MIN_UNLOCK_PERIOD_SECONDS = 60 * 60;
+/** state.rs::MIN_DAILY_LOSS_LIMIT_BPS / MAX_DAILY_LOSS_LIMIT_BPS. */
+export const MIN_DAILY_LOSS_LIMIT_BPS = 100;
+export const MAX_DAILY_LOSS_LIMIT_BPS = 5_000;
+/** state.rs::MAX_TRADE_NOTIONAL_CEILING (1M SOL). */
+export const MAX_TRADE_NOTIONAL_CEILING = 1_000_000_000_000_000n;
+/** state.rs::MIN_DEPOSIT_HOLD_SECONDS - instant exits carry a hold. */
+export const MIN_DEPOSIT_HOLD_SECONDS = 3_600;
+/** state.rs::DEPOSIT_COOLDOWN_SECONDS - deposits pause after a large mark. */
+export const DEPOSIT_COOLDOWN_SECONDS = 3_600;
+
 export const MAX_UNLOCK_PERIOD_SECONDS = 7 * 86_400;
 export const MIN_NAV_DELTA_BPS = 100;
 export const MAX_NAV_DELTA_BPS = 5_000;
@@ -251,12 +270,24 @@ export function treasuryPda(programId: PublicKey = VAULT_PROGRAM_ID): [PublicKey
   return PublicKey.findProgramAddressSync([TREASURY_SEED], programId);
 }
 
+/**
+ * Vault PDA: ["vault", creator, name].
+ *
+ * The creator is part of the seeds so a vault name is unique PER CREATOR.
+ * It used to be the name alone on a permissionless instruction, which meant
+ * anyone watching for a launch could take the PDA with a higher priority fee
+ * and become the trader of the name everyone was about to deposit into.
+ */
 export function vaultPda(
+  creator: PublicKey,
   name: string | Buffer,
   programId: PublicKey = VAULT_PROGRAM_ID,
 ): [PublicKey, number] {
   const nameBytes = Buffer.isBuffer(name) ? name : encodeVaultName(name);
-  return PublicKey.findProgramAddressSync([VAULT_SEED, nameBytes], programId);
+  return PublicKey.findProgramAddressSync(
+    [VAULT_SEED, creator.toBuffer(), nameBytes],
+    programId,
+  );
 }
 
 export function vaultDepositorPda(
@@ -284,7 +315,18 @@ export interface PlatformConfigAccount {
   bump: number;
   treasuryBump: number;
   admin: PublicKey;
+  /** staged admin handover; PublicKey.default when none is outstanding */
+  pendingAdmin: PublicKey;
+  /** the dedicated NAV keeper key, deliberately NOT the admin */
+  navKeeper: PublicKey;
   killSwitch: boolean;
+}
+
+/** A recorded holding and what the vault paid for it (execute_swap basis). */
+export interface VaultPosition {
+  mint: PublicKey;
+  tokenAmount: bigint;
+  wsolBasisLamports: bigint;
 }
 
 export interface WithdrawRequestState {
@@ -297,6 +339,8 @@ export interface VaultAccount {
   bump: number;
   name: string;
   nameBytes: Buffer;
+  /** part of the PDA seeds, so immutable; see vaultPda */
+  creator: PublicKey;
   trader: PublicKey;
   operator: PublicKey;
   navKeeper: PublicKey;
@@ -321,13 +365,19 @@ export interface VaultAccount {
   maxPriceImpactBps: number;
   dailyLossLimitBps: number;
   dailyLossAccumulator: bigint;
+  dailyGainAccumulator: bigint;
   dayBucket: bigint;
   dayStartEquity: bigint;
+  /** deposits refused until this unix time, after a large NAV move */
+  depositCooldownUntil: bigint;
+  dailySwapSpendLamports: bigint;
+  swapDayBucket: bigint;
   pendingWithdrawValueLamports: bigint;
   pendingWithdrawShares: bigint;
   platformFeesOwedLamports: bigint;
   enforceMintAllowlist: boolean;
   allowedMints: PublicKey[];
+  positions: VaultPosition[];
 }
 
 export interface VaultDepositorAccount {
@@ -338,6 +388,8 @@ export interface VaultDepositorAccount {
   netDepositsLamports: bigint;
   cumulativeProfitShareLamports: bigint;
   lastWithdrawRequest: WithdrawRequestState;
+  /** gates instant_withdraw for MIN_DEPOSIT_HOLD_SECONDS */
+  lastDepositTs: bigint;
 }
 
 // ── decoders ───────────────────────────────────────────────────────
@@ -361,6 +413,8 @@ export function decodePlatformConfig(data: Buffer): PlatformConfigAccount {
     bump: r.u8(),
     treasuryBump: r.u8(),
     admin: r.pubkey(),
+    pendingAdmin: r.pubkey(),
+    navKeeper: r.pubkey(),
     killSwitch: r.bool(),
   };
 }
@@ -371,6 +425,7 @@ export function decodeVault(data: Buffer): VaultAccount {
   r.skip(8);
   const bump = r.u8();
   const nameBytes = r.bytes(32);
+  const creator = r.pubkey();
   const trader = r.pubkey();
   const operator = r.pubkey();
   const navKeeper = r.pubkey();
@@ -395,19 +450,35 @@ export function decodeVault(data: Buffer): VaultAccount {
   const maxPriceImpactBps = r.u16();
   const dailyLossLimitBps = r.u16();
   const dailyLossAccumulator = r.u64();
+  const dailyGainAccumulator = r.u64();
   const dayBucket = r.i64();
   const dayStartEquity = r.u64();
+  const depositCooldownUntil = r.i64();
+  const dailySwapSpendLamports = r.u64();
+  const swapDayBucket = r.i64();
   const pendingWithdrawValueLamports = r.u64();
   const pendingWithdrawShares = r.u128();
   const platformFeesOwedLamports = r.u64();
   const enforceMintAllowlist = r.bool();
   const allowedMints: PublicKey[] = [];
   for (let i = 0; i < 8; i += 1) allowedMints.push(r.pubkey());
+  // Recorded cost basis, one slot per held mint. Empty slots carry the
+  // default pubkey and are dropped rather than surfaced as a holding.
+  const positions: VaultPosition[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    const mint = r.pubkey();
+    const tokenAmount = r.u64();
+    const wsolBasisLamports = r.u64();
+    if (!mint.equals(PublicKey.default)) {
+      positions.push({ mint, tokenAmount, wsolBasisLamports });
+    }
+  }
   // trailing [u8; 64] padding is intentionally not surfaced
   return {
     bump,
     name: decodeVaultName(nameBytes),
     nameBytes,
+    creator,
     trader,
     operator,
     navKeeper,
@@ -432,13 +503,18 @@ export function decodeVault(data: Buffer): VaultAccount {
     maxPriceImpactBps,
     dailyLossLimitBps,
     dailyLossAccumulator,
+    dailyGainAccumulator,
     dayBucket,
     dayStartEquity,
+    depositCooldownUntil,
+    dailySwapSpendLamports,
+    swapDayBucket,
     pendingWithdrawValueLamports,
     pendingWithdrawShares,
     platformFeesOwedLamports,
     enforceMintAllowlist,
     allowedMints,
+    positions,
   };
 }
 
@@ -458,6 +534,7 @@ export function decodeVaultDepositor(data: Buffer): VaultDepositorAccount {
       valueAtRequestLamports: r.u64(),
       requestedAt: r.i64(),
     },
+    lastDepositTs: r.i64(),
   };
 }
 
@@ -585,8 +662,13 @@ export function validateInitVaultParams(p: InitVaultParams): void {
   encodeVaultName(p.name); // throws on >32 bytes / empty
   if (p.perfFeeBps < MIN_PERF_FEE_BPS_AT_INIT || p.perfFeeBps > MAX_PERF_FEE_BPS)
     bad(`perfFeeBps must be within [${MIN_PERF_FEE_BPS_AT_INIT}, ${MAX_PERF_FEE_BPS}]`);
-  if (p.redeemWindowSeconds < 0n || p.redeemWindowSeconds > BigInt(MAX_REDEEM_WINDOW_SECONDS))
-    bad(`redeemWindowSeconds must be within [0, ${MAX_REDEEM_WINDOW_SECONDS}]`);
+  if (
+    p.redeemWindowSeconds < BigInt(MIN_REDEEM_WINDOW_SECONDS) ||
+    p.redeemWindowSeconds > BigInt(MAX_REDEEM_WINDOW_SECONDS)
+  )
+    bad(
+      `redeemWindowSeconds must be within [${MIN_REDEEM_WINDOW_SECONDS}, ${MAX_REDEEM_WINDOW_SECONDS}]`,
+    );
   if (
     p.navStalenessSeconds < BigInt(MIN_NAV_STALENESS_SECONDS) ||
     p.navStalenessSeconds > BigInt(MAX_NAV_STALENESS_SECONDS)
@@ -594,12 +676,33 @@ export function validateInitVaultParams(p: InitVaultParams): void {
     bad(
       `navStalenessSeconds must be within [${MIN_NAV_STALENESS_SECONDS}, ${MAX_NAV_STALENESS_SECONDS}]`,
     );
-  if (p.unlockPeriodSeconds < 0n || p.unlockPeriodSeconds > BigInt(MAX_UNLOCK_PERIOD_SECONDS))
-    bad(`unlockPeriodSeconds must be within [0, ${MAX_UNLOCK_PERIOD_SECONDS}]`);
+  if (
+    p.unlockPeriodSeconds < BigInt(MIN_UNLOCK_PERIOD_SECONDS) ||
+    p.unlockPeriodSeconds > BigInt(MAX_UNLOCK_PERIOD_SECONDS)
+  )
+    bad(
+      `unlockPeriodSeconds must be within [${MIN_UNLOCK_PERIOD_SECONDS}, ${MAX_UNLOCK_PERIOD_SECONDS}]`,
+    );
   if (p.maxNavDeltaBps < MIN_NAV_DELTA_BPS || p.maxNavDeltaBps > MAX_NAV_DELTA_BPS)
     bad(`maxNavDeltaBps must be within [${MIN_NAV_DELTA_BPS}, ${MAX_NAV_DELTA_BPS}]`);
-  if (p.dailyLossLimitBps < 0 || p.dailyLossLimitBps > 10_000)
-    bad("dailyLossLimitBps must be within [0, 10000]");
+  // Zero used to be legal and switched the breaker off entirely, with no
+  // instruction anywhere to switch it back on.
+  if (
+    p.dailyLossLimitBps < MIN_DAILY_LOSS_LIMIT_BPS ||
+    p.dailyLossLimitBps > MAX_DAILY_LOSS_LIMIT_BPS
+  )
+    bad(
+      `dailyLossLimitBps must be within [${MIN_DAILY_LOSS_LIMIT_BPS}, ${MAX_DAILY_LOSS_LIMIT_BPS}]`,
+    );
+  // u64::MAX went straight to state with no validation, and it was this
+  // platform's own default, so the per-trade notional cap capped nothing.
+  if (
+    p.maxTradeNotionalLamports <= 0n ||
+    p.maxTradeNotionalLamports > MAX_TRADE_NOTIONAL_CEILING
+  )
+    bad(`maxTradeNotionalLamports must be within (0, ${MAX_TRADE_NOTIONAL_CEILING}]`);
+  if (p.maxPriceImpactBps < 0 || p.maxPriceImpactBps > 10_000)
+    bad("maxPriceImpactBps must be within [0, 10000]");
   if (p.navKeeper.equals(PublicKey.default)) bad("navKeeper must not be the default pubkey");
   if (p.seedLamports < MIN_SEED_LAMPORTS)
     bad(`seedLamports must be >= ${MIN_SEED_LAMPORTS} (0.01 SOL)`);
@@ -627,8 +730,8 @@ function encodeInitVaultParams(p: InitVaultParams): Buffer {
  * init_vault — creator becomes the trader and burns the seed deposit.
  * Accounts (InitVault, in order):
  *   0 creator        signer, mut   pays rent + the burned seed
- *   1 vault          mut           init, PDA ["vault", name]
- *   2 platform_config              PDA ["platform_config"] (must exist)
+ *   1 vault          mut           init, PDA ["vault", creator, name]
+ *   2 platform_config              PDA ["platform_config_v2"] (must exist)
  *   3 system_program
  */
 export function buildInitVaultIx(params: {
@@ -638,7 +741,7 @@ export function buildInitVaultIx(params: {
 }): { ix: TransactionInstruction; vault: PublicKey; bump: number } {
   const programId = params.programId ?? VAULT_PROGRAM_ID;
   validateInitVaultParams(params.vault);
-  const [vault, bump] = vaultPda(params.vault.name, programId);
+  const [vault, bump] = vaultPda(params.creator, params.vault.name, programId);
   const [platformConfig] = platformConfigPda(programId);
   const data = Buffer.concat([
     ixDiscriminator("init_vault"),

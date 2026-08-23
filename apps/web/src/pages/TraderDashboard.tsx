@@ -291,9 +291,10 @@ export function TraderDashboard() {
               {vault.mode === "real" && (
                 <>
                   {" "}
-                  <strong>Real vaults are not on these terms yet:</strong> the deployed program
-                  still pays your full fee on exit and takes a separate 10% platform cut, so
-                  nothing here accrues for them until it is upgraded and redeployed.
+                  <strong>Vesting is not live on real vaults yet:</strong> the deployed
+                  program pays your full fee on exit, so nothing accrues here for them
+                  until escrow ships. The platform takes no cut either way — that part
+                  is already true on chain.
                 </>
               )}
             </p>

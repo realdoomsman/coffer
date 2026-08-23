@@ -39,8 +39,10 @@ const PROGRAM_ID = new PublicKey('8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U')
 const BPF_LOADER_UPGRADEABLE = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
 
 // state.rs
-const PLATFORM_CONFIG_SEED = Buffer.from('platform_config');
-const TREASURY_SEED = Buffer.from('treasury');
+// v2: the account layout gained nav_keeper + pending_admin and an
+// allocated PDA cannot grow. Mirrors state.rs::PLATFORM_CONFIG_SEED.
+const PLATFORM_CONFIG_SEED = Buffer.from('platform_config_v2');
+const TREASURY_SEED = Buffer.from('treasury_v2');
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 const KEYPAIR_PATH =
@@ -113,11 +115,12 @@ function looksAlreadyInitialized(errText, logs) {
 
 /**
  * PlatformConfig, per state.rs:
- *   bump: u8, treasury_bump: u8, admin: Pubkey (32), kill_switch: bool
+ *   bump: u8, treasury_bump: u8, admin: Pubkey (32), pending_admin: Pubkey (32),
+ *   nav_keeper: Pubkey (32), kill_switch: bool, padding: [u8; 128]
  * preceded by the 8-byte Anchor account discriminator.
  */
 function decodePlatformConfig(data) {
-  const EXPECTED_LEN = 8 + 1 + 1 + 32 + 1; // 43
+  const EXPECTED_LEN = 8 + 1 + 1 + 32 + 32 + 32 + 1 + 128; // 235
   if (data.length < EXPECTED_LEN) {
     throw new Error(
       `PlatformConfig too short: ${data.length} bytes, need >= ${EXPECTED_LEN}`,
@@ -127,11 +130,15 @@ function decodePlatformConfig(data) {
   const bump = data.readUInt8(o); o += 1;
   const treasuryBump = data.readUInt8(o); o += 1;
   const admin = new PublicKey(data.subarray(o, o + 32)); o += 32;
+  const pendingAdmin = new PublicKey(data.subarray(o, o + 32)); o += 32;
+  const navKeeper = new PublicKey(data.subarray(o, o + 32)); o += 32;
   const killSwitchByte = data.readUInt8(o); o += 1;
   return {
     bump,
     treasuryBump,
     admin,
+    pendingAdmin,
+    navKeeper,
     killSwitch: killSwitchByte === 1,
     killSwitchRawByte: killSwitchByte,
     declaredLen: data.length,
@@ -228,9 +235,22 @@ async function main() {
 
   // -- build init_platform ---------------------------------------------------
   console.log('\n[3] Hand-built init_platform instruction');
-  const data = ixDiscriminator('init_platform');
+  // init_platform now takes the dedicated NAV keeper as its one argument.
+  // It is deliberately NOT the signer: the key that posts NAV every hour must
+  // not be the key that can rewrite the program.
+  const navKeeperArg = process.env.NAV_KEEPER
+    ? new PublicKey(process.env.NAV_KEEPER)
+    : payer.publicKey;
+  if (navKeeperArg.equals(payer.publicKey)) {
+    console.log(
+      '  ! NAV_KEEPER is unset, so the keeper is the upgrade authority. That is ' +
+      'the concentration the program was changed to allow you to avoid. ' +
+      'Set NAV_KEEPER to a dedicated key before this holds real money.',
+    );
+  }
+  const data = Buffer.concat([ixDiscriminator('init_platform'), navKeeperArg.toBuffer()]);
   ok(`discriminator sha256("global:init_platform")[0..8] = ${data.toString('hex')}`);
-  info('no args -> instruction data is exactly those 8 bytes');
+  info(`arg: nav_keeper = ${navKeeperArg.toBase58()}`);
 
   // Order is load-bearing: it must match the field order of InitPlatform in
   // instructions/init_platform.rs exactly.
@@ -342,6 +362,8 @@ async function main() {
       console.log(`      bump           = ${cfg.bump}   (derived off-chain: ${platformBump})`);
       console.log(`      treasury_bump  = ${cfg.treasuryBump}   (derived off-chain: ${treasuryBump})`);
       console.log(`      admin          = ${cfg.admin.toBase58()}`);
+      console.log(`      pending_admin  = ${cfg.pendingAdmin.toBase58()}`);
+      console.log(`      nav_keeper     = ${cfg.navKeeper.toBase58()}`);
       console.log(`      kill_switch    = ${cfg.killSwitch}  (raw byte 0x${cfg.killSwitchRawByte.toString(16)})`);
       console.log(`      account size   = ${cfg.declaredLen} bytes (8 disc + 35 data)`);
 
@@ -354,6 +376,13 @@ async function main() {
       }
       if (cfg.killSwitch !== false) fail('kill_switch should be false at init');
       if (cfg.killSwitchRawByte > 1) fail('kill_switch byte is not a valid bool');
+      // The whole point of the keeper split: the key that must be online
+      // every hour is not the key that can rewrite the program.
+      if (cfg.navKeeper.equals(cfg.admin)) {
+        fail('nav_keeper == admin: the always-online key is also the upgrade authority');
+      } else {
+        ok('nav_keeper != admin (the always-online key holds no other authority)');
+      }
     } catch (e) {
       fail(`PlatformConfig decode failed: ${e.message}`);
     }

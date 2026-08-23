@@ -52,7 +52,7 @@ import {
   getConnection,
   getLamports,
   sendAndConfirm,
-  tryGetServerKeypair,
+  tryGetNavKeeperKeypair,
 } from "./signer.js";
 
 // ── cadence ────────────────────────────────────────────────────────
@@ -291,9 +291,9 @@ async function navTick(): Promise<void> {
 
     // Degrade instead of throwing when the keypair is absent (a deploy
     // without SOLANA_KEYPAIR_PATH is a legitimate read-only deployment).
-    const key = tryGetServerKeypair();
+    const key = tryGetNavKeeperKeypair();
     if ("error" in key) {
-      console.warn(`[nav] no server keypair — cannot post NAV for ${rows.length} vault(s): ${key.error}`);
+      console.warn(`[nav] no keeper keypair — cannot post NAV for ${rows.length} vault(s): ${key.error}`);
       return;
     }
     const keeper = key.keypair;
@@ -425,7 +425,10 @@ async function navTick(): Promise<void> {
           navLamports: navToPost,
           markSlot,
         });
-        const sent = await sendAndConfirm([ix], [], { label: `post_nav(${row.id})` });
+        // The keeper signs; the server key pays. Keeping the fee payer
+        // separate means the keeper wallet only ever needs to exist, not to
+        // be funded, which is one less reason to touch it.
+        const sent = await sendAndConfirm([ix], [keeper], { label: `post_nav(${row.id})` });
 
         const fee = BigInt(sent.feeLamports ?? Number(SIGNATURE_FEE_LAMPORTS));
         feesSpentLamports += fee;

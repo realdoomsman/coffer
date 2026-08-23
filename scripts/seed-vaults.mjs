@@ -7,6 +7,14 @@
 // share math and trading are exercised against real on-chain accounts.
 //
 // Usage:  node scripts/seed-vaults.mjs [solPerVault]
+//
+// NOTE on how a donation reaches depositors: it does not, on its own. A plain
+// transfer raises the PDA's lamports without minting shares and without
+// moving nav_lamports, so nothing prices it. What makes it land is post_nav's
+// lamport floor: the keeper can no longer post a mark BELOW the vault's own
+// unencumbered balance, so the next mark has to recognise the donation, and
+// at that point every existing share is worth more. Seed, then wait for a
+// mark.
 
 import { readFileSync } from "node:fs";
 import {
@@ -40,8 +48,11 @@ console.log(`balance: ${(bal / 1e9).toFixed(4)} SOL`);
 // Which vaults actually exist on chain? The API does not expose the PDA, so
 // ask the program directly: every account it owns of the Vault size.
 const PROGRAM = new PublicKey("8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U");
+// 8-byte discriminator + Vault::INIT_SPACE. Printed by the program's own
+// `print_account_sizes` test; update both together.
+const VAULT_ACCOUNT_SIZE = 1095;
 const accounts = await conn.getProgramAccounts(PROGRAM, {
-  filters: [{ dataSize: 647 }],
+  filters: [{ dataSize: VAULT_ACCOUNT_SIZE }],
 });
 console.log(`on-chain vaults found: ${accounts.length}`);
 

@@ -123,6 +123,51 @@ export function getServerPublicKey(): PublicKey {
   return getServerKeypair().publicKey;
 }
 
+let cachedKeeper: Keypair | null = null;
+let warnedAboutKeeperFallback = false;
+
+/**
+ * The NAV keeper keypair.
+ *
+ * Distinct from the server key by design — see env.navKeeperKeypairJson. The
+ * keeper signs post_nav every hour and holds no other authority: it cannot
+ * upgrade the program, cannot unfreeze a circuit breaker and cannot sweep the
+ * treasury.
+ *
+ * Falling back to the server key keeps local and read-only deployments
+ * working, but it reinstates exactly the concentration the split exists to
+ * remove, so it says so — once, loudly.
+ */
+export function getNavKeeperKeypair(): Keypair {
+  if (!cachedKeeper) {
+    const raw = env.navKeeperKeypairJson;
+    if (raw) {
+      cachedKeeper = keypairFromBytes(raw.trim(), "NAV_KEEPER_KEYPAIR_JSON");
+    } else {
+      if (!warnedAboutKeeperFallback) {
+        warnedAboutKeeperFallback = true;
+        console.warn(
+          "[signer] NAV_KEEPER_KEYPAIR_JSON is unset — falling back to the server key. " +
+            "That makes the NAV keeper, the platform admin and the program upgrade " +
+            "authority one always-online key, which is the concentration the keeper " +
+            "split exists to remove. Set it before this holds real money.",
+        );
+      }
+      cachedKeeper = getServerKeypair();
+    }
+  }
+  return cachedKeeper;
+}
+
+/** Non-throwing probe, matching tryGetServerKeypair. */
+export function tryGetNavKeeperKeypair(): { keypair: Keypair } | { error: string } {
+  try {
+    return { keypair: getNavKeeperKeypair() };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
 // ── errors that carry logs ─────────────────────────────────────────
 
 export class OnChainError extends Error {

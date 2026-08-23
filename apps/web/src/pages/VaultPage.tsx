@@ -134,15 +134,15 @@ export function VaultPage() {
 
           <div className="panel panel-pad">
             <div className="sectiontitle" style={{ marginTop: 0 }}>The deal</div>
-            {/* A real vault is settled by the DEPLOYED bytecode, which still
-                runs the old split. Show what it actually enforces — the new
-                terms are described below as pending the program upgrade. */}
+            {/* The platform takes NOTHING, on real and paper alike. This
+                block used to quote real vaults a 10% platform cut while
+                settle_withdrawal charged zero — a depositor with 10 SOL of
+                profit was told 6 SOL and paid 7. Same number both sides now,
+                and it comes from one expression so they cannot drift. */}
             <div className="kv">
               <span className="k">If you profit</span>
               <span className="v">
-                {vault.mode === "real"
-                  ? `keep ${(90 - vault.perfFeeBps / 100).toFixed(0)}% · trader ${(vault.perfFeeBps / 100).toFixed(0)}% · platform 10%`
-                  : `keep ${(100 - vault.perfFeeBps / 100).toFixed(0)}% · trader ${(vault.perfFeeBps / 100).toFixed(0)}% · platform 0%`}
+                {`keep ${(100 - vault.perfFeeBps / 100).toFixed(0)}% · trader ${(vault.perfFeeBps / 100).toFixed(0)}% · platform 0%`}
               </span>
             </div>
             <div className="kv">
@@ -222,10 +222,10 @@ export function VaultPage() {
               const dep = parseFloat(hypo) || 0;
               const ret = vault.stats.pnlPct30d / 100;
               const gross = dep * ret;
-              // Real vaults settle under the DEPLOYED program: trader fee
-              // plus a 10% platform cut on top. Paper vaults are the new
-              // deal — the trader's fee is the only thing charged.
-              const platformRate = vault.mode === "real" ? 0.1 : 0;
+              // The trader's performance fee is the only thing charged, on
+              // real and paper alike. This used to add 10% for real vaults,
+              // which the program has never taken.
+              const platformRate = 0;
               const traderRate = vault.perfFeeBps / 10_000;
               const yoursRate = 1 - traderRate - platformRate;
               const yours = gross > 0 ? gross * yoursRate : gross;
@@ -244,10 +244,10 @@ export function VaultPage() {
                     </span>
                   </div>
                   <div className="kv">
-                    <span className="k">Trader / platform</span>
+                    <span className="k">Trader's fee</span>
                     <span className="v dimtx">
                       {gross > 0
-                        ? `${fmtSol(gross * traderRate)} / ${fmtSol(gross * platformRate)} ◎`
+                        ? `${fmtSol(gross * traderRate)} ◎ · platform takes nothing`
                         : "0 — no profit, no fee"}
                     </span>
                   </div>

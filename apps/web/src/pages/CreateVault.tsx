@@ -190,12 +190,11 @@ export function CreateVault() {
           </div>
           {mode === "real" && (
             <div className="callout red">
-              Real vaults today: the terms above are NOT what the deployed program enforces. Its
-              live bytecode still pays the trader {perfFee.toFixed(0)}% in full on exit — no
-              escrow — and charges a separate 10% platform cut on top, so depositors would keep{" "}
-              {(90 - perfFee).toFixed(0)}%, not 70%. The 70 / 30 vesting terms take effect on real
-              vaults only after the program is upgraded and redeployed. Paper vaults already run
-              the new economics.
+              Real vaults today: the split above is what the program enforces — depositors
+              keep {(100 - perfFee).toFixed(0)}% of profit, you take {perfFee.toFixed(0)}%,
+              the platform takes nothing. What is NOT live is the escrow: the deployed
+              bytecode pays your whole fee on exit rather than vesting a third of it, so the
+              vesting terms apply to paper vaults only until that ships.
             </div>
           )}
         </div>

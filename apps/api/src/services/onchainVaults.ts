@@ -45,8 +45,14 @@ export const PLATFORM_VAULT_DEFAULTS = {
   maxPriceImpactBps: 300,
   /** daily NAV-loss circuit breaker (freezes TRADING only) */
   dailyLossLimitBps: 2_000,
-  /** u64::MAX = per-trade notional uncapped */
-  maxTradeNotionalLamports: 18_446_744_073_709_551_615n,
+  /**
+   * Per-trade wSOL notional cap: 1,000 SOL.
+   *
+   * This was u64::MAX - "uncapped" - on every vault the platform created,
+   * which made the cap a field the UI could show and nothing else. The
+   * program now rejects u64::MAX outright.
+   */
+  maxTradeNotionalLamports: 1_000_000_000_000n,
 } as const;
 
 export interface InitVaultOnChainInput {

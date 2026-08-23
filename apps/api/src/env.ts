@@ -147,6 +147,24 @@ export const env = {
     return str("SOLANA_KEYPAIR_PATH", str("SOLANA_KEYPAIR", ""));
   },
   /**
+   * The NAV keeper key, as a JSON byte array.
+   *
+   * SEPARATE FROM THE SERVER KEY ON PURPOSE. The keeper has to sign a
+   * transaction every hour or withdrawals start reverting NavStale, so it is
+   * necessarily hot. The server key is the platform admin and the program
+   * upgrade authority. Collapsing them — which the previous build did, by
+   * pinning every vault's nav_keeper to platform_config.admin — made the
+   * upgrade authority a permanently-online key that could also set any
+   * vault's share price to any value, with no way to move it to a multisig
+   * without breaking NAV posting.
+   *
+   * Unset falls back to the server key with a warning, because a read-only
+   * or local deployment should still start.
+   */
+  get navKeeperKeypairJson(): string {
+    return str("NAV_KEEPER_KEYPAIR_JSON", "");
+  },
+  /**
    * Platform-controlled escrow wallet that holds the VESTED third of each
    * trader's performance fee for VEST_LOCK_DAYS. A dedicated keypair —
    * never the server/deployer key. Only the PUBKEY is ever read here; the

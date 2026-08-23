@@ -61,7 +61,7 @@ import {
   vaultPda,
 } from "../services/program.js";
 import { PrivyAuthError, privyConfigured, requirePrivyUser } from "../services/privyAuth.js";
-import { getConnection } from "../services/signer.js";
+import { getConnection, getServerKeypair } from "../services/signer.js";
 
 export const onchainRouter = Router();
 
@@ -287,10 +287,14 @@ async function loadRealVault(
     });
     return null;
   }
-  const [derived] = vaultPda(dbVault.id);
+  // The vault PDA is seeded on [creator, name] now, not name alone. Every
+  // vault the platform created has the server key as its creator; a vault
+  // created by anyone else is not one this route can build a deposit for.
+  const [derived] = vaultPda(getServerKeypair().publicKey, dbVault.id);
   if (derived.toBase58() !== dbVault.onchainVaultPda) {
-    // The PDA is a pure function of the row id; a mismatch means the row
-    // was tampered with. Refuse rather than send money to a stored string.
+    // The PDA is a pure function of (creator, row id); a mismatch means the
+    // row was tampered with, or the vault was created by another key.
+    // Refuse rather than send money to a stored string.
     res.status(500).json({
       error: "stored vault PDA does not match the PDA derived from the vault id",
       code: "pda_mismatch",
