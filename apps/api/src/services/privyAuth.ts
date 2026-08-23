@@ -31,6 +31,20 @@
 // is "this request is user X, whose wallet is Y"; the wallet's key never
 // leaves the user's device.
 
+// jose verifies JWTs with the WebCrypto API, which reaches for
+// globalThis.crypto. That global does not exist on Node 18 — it landed in
+// Node 19 — and package.json had no `engines` field, so nixpacks built with
+// its default 18 and every Privy login failed with the genuinely unhelpful
+// "crypto is not defined (invalid_token)".
+//
+// engines.node is now >=20, which is the real fix. This stays as well: it
+// costs nothing and means an older runtime degrades to working rather than
+// to a login wall.
+import { webcrypto } from "node:crypto";
+if (!globalThis.crypto) {
+  Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true });
+}
+
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import type { Request } from "express";
 import type { User } from "@prisma/client";

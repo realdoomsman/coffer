@@ -2,7 +2,7 @@
   "name": "coffer",
   "private": true,
   "version": "0.1.0",
-  "description": "Trader vaults on Solana — traders trade pooled capital they can never withdraw.",
+  "description": "Trader vaults on Solana \u2014 traders trade pooled capital they can never withdraw.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -20,5 +20,8 @@
     "prisma:prod:validate": "node scripts/prisma-prod.mjs validate",
     "db:generate:dev": "npm run db:generate -w apps/api",
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
