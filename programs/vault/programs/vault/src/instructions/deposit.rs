@@ -36,8 +36,53 @@ pub struct Deposit<'info> {
 
 pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
-    let vault = &mut ctx.accounts.vault;
-    let depositor = &mut ctx.accounts.depositor;
+
+    // Validate, price and book FIRST. The whole transaction reverts as one, so
+    // ordering the CPI after this is safe, and it keeps every number this
+    // instruction decides inside a function a test can call.
+    let shares = {
+        let vault = &mut ctx.accounts.vault;
+        let depositor = &mut ctx.accounts.depositor;
+        apply_deposit(vault, depositor, amount_lamports, now)?
+    };
+
+    // Inflow: user -> vault PDA lamports.
+    system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.authority.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+            },
+        ),
+        amount_lamports,
+    )?;
+
+    let vault = &ctx.accounts.vault;
+    let depositor = &ctx.accounts.depositor;
+    emit!(Deposited {
+        vault: vault.key(),
+        depositor: depositor.authority,
+        amount_lamports,
+        shares_minted: shares,
+        total_shares: vault.total_shares,
+        nav_lamports: vault.nav_lamports,
+    });
+    Ok(())
+}
+
+/// Everything `deposit` decides, with no Context and no CPI.
+///
+/// Split out so it can be EXECUTED by a test — the same reason post_nav was
+/// split. It earned that immediately: `last_deposit_ts` was declared, checked
+/// by instant_withdraw, and written by nothing, so the hold gate was inert.
+/// Returns the shares minted.
+pub fn apply_deposit(
+    vault: &mut Vault,
+    depositor: &mut VaultDepositor,
+    amount_lamports: u64,
+    now: i64,
+) -> Result<u128> {
 
     // Deposits only into a healthy vault. (Withdrawals, by contrast, are
     // never status-gated — see withdraw.rs.)
@@ -99,22 +144,19 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
         .ok_or(VaultError::MathOverflow)?;
     require!(new_nav <= MAX_NAV_LAMPORTS, VaultError::NavCapExceeded);
 
-    // Inflow: user -> vault PDA lamports.
-    system_program::transfer(
-        CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            system_program::Transfer {
-                from: ctx.accounts.authority.to_account_info(),
-                to: vault.to_account_info(),
-            },
-        ),
-        amount_lamports,
-    )?;
-
     // Bookkeeping. NAV grows by exactly the deposited lamports: the keeper
     // marks value changes, the program tracks flows.
     vault.total_shares = new_total_shares;
     vault.nav_lamports = new_nav;
+
+    // B5: stamp the deposit so instant_withdraw can enforce the hold.
+    //
+    // The field and the check both existed; nothing ever WROTE it, so it stayed
+    // zero forever and `now - 0 >= MIN_DEPOSIT_HOLD_SECONDS` was true on the
+    // first block of 1970. The gate was inert, and inert in the direction that
+    // fails open. Caught by the withdrawal e2e reporting a depositor who had
+    // "held for 1787486933s".
+    depositor.last_deposit_ts = now;
 
     depositor.shares = depositor
         .shares
@@ -133,13 +175,5 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
             .ok_or(VaultError::MathOverflow)?;
     }
 
-    emit!(Deposited {
-        vault: vault.key(),
-        depositor: depositor.authority,
-        amount_lamports,
-        shares_minted: shares,
-        total_shares: vault.total_shares,
-        nav_lamports: vault.nav_lamports,
-    });
-    Ok(())
+    Ok(shares)
 }

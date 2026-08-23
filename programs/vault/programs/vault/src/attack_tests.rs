@@ -334,6 +334,31 @@ fn a_zero_value_burn_is_refused() {
     assert_eq!(depositor.shares, before, "shares must survive a refused burn");
 }
 
+/// B5: the deposit hold is only a gate if a deposit actually stamps the clock.
+///
+/// The field and the check both shipped; nothing wrote it, so `last_deposit_ts`
+/// stayed 0 and `now - 0 >= MIN_DEPOSIT_HOLD_SECONDS` was true for every caller
+/// forever. A gate that fails open is worse than no gate, because the code
+/// reads as though it is protected.
+#[test]
+fn a_deposit_stamps_the_hold_clock() {
+    let now = 1_800_000_000i64;
+    let mut vault = vault_with(100 * SOL, 100_000 * SOL as u128, now);
+    let mut depositor = depositor_with(0, 0);
+    assert_eq!(depositor.last_deposit_ts, 0);
+
+    crate::instructions::deposit::apply_deposit(&mut vault, &mut depositor, 1 * SOL, now).unwrap();
+
+    assert_eq!(
+        depositor.last_deposit_ts, now,
+        "deposit must stamp last_deposit_ts, or the instant-withdraw hold is inert"
+    );
+    assert!(
+        now.saturating_sub(depositor.last_deposit_ts) < MIN_DEPOSIT_HOLD_SECONDS,
+        "a fresh depositor must be inside the hold window"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // B9 — unbounded share supply
 // ---------------------------------------------------------------------------
