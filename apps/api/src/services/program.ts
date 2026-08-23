@@ -1252,11 +1252,16 @@ export function buildExecuteSwapIx(params: {
  * wsol_account(mut, vault-owned), token_program.
  * Args: amount_lamports u64.
  *
- * The wSOL ATA itself is created permissionlessly through the Associated
- * Token program — the vault program never creates it — so a caller funding a
- * vault for the first time must prepend a createAssociatedTokenAccountIdempotent
- * instruction. There was no builder for this at all, which is why a vault could
- * never have a source token account to swap from.
+ * TWO THINGS THE CALLER MUST DO AROUND THIS:
+ *   · PREPEND createAssociatedTokenAccountIdempotent — the vault program never
+ *     creates the ATA; the Associated Token program does, permissionlessly.
+ *   · APPEND SyncNative — the program moves lamports and stops there. It used
+ *     to CPI sync_native itself, and that never worked: the runtime verifies
+ *     the caller's account changes before executing a CPI, and a direct
+ *     lamport credit into a Token-program-owned account does not survive it.
+ *
+ * There was no builder for wrap_sol at all, which is why a vault could never
+ * have a source token account to swap from.
  */
 export function buildWrapSolIx(params: {
   authority: PublicKey;

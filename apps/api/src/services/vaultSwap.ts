@@ -12,9 +12,13 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountIdempotentInstruction,
+  createSyncNativeInstruction,
+} from "@solana/spl-token";
 import {
   buildExecuteSwapIx,
+  buildUnwrapSolIx,
   buildWrapSolIx,
   fetchVaultAccount,
   vaultTokenAccount,
@@ -337,6 +341,9 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
           vault: vaultPda,
           amountLamports: amountIn - wsolBalance,
         }).ix,
+        // wrap_sol moves the lamports; telling the Token program to notice is
+        // a separate, permissionless act. See buildWrapSolIx.
+        createSyncNativeInstruction(sourceToken),
       );
     }
   }
@@ -382,10 +389,22 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
     computeUnitLimit: jupiterIxs.computeUnitLimit ?? 400_000,
   });
 
+  // Selling back into SOL leaves the proceeds sitting in the vault's wSOL
+  // account, where they back NAV but cannot pay a withdrawal — every payout
+  // path spends the vault PDA's own lamports. Closing the float in the same
+  // transaction returns it. (settle_unwrap exists as the permissionless
+  // backstop for when this did not happen; it should not be the normal path.)
+  const teardownIxs: TransactionInstruction[] = [];
+  if (outputMint.equals(WSOL_MINT)) {
+    teardownIxs.push(
+      buildUnwrapSolIx({ authority: signer.publicKey, vault: vaultPda }).ix,
+    );
+  }
+
   const message = new TransactionMessage({
     payerKey: signer.publicKey,
     recentBlockhash: blockhash,
-    instructions: [...budgetIxs, ...setupIxs, executeSwapIx],
+    instructions: [...budgetIxs, ...setupIxs, executeSwapIx, ...teardownIxs],
   }).compileToV0Message(lookupTables);
 
   const tx = new VersionedTransaction(message);

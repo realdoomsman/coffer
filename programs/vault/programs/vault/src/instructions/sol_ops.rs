@@ -10,7 +10,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{
-    close_account, sync_native, CloseAccount, SyncNative, TokenAccount, TokenInterface,
+    close_account, CloseAccount, TokenAccount, TokenInterface,
 };
 
 use crate::errors::VaultError;
@@ -68,19 +68,28 @@ pub fn handle_wrap_sol(ctx: Context<WrapSol>, amount_lamports: u64) -> Result<()
         VaultError::InsufficientSolBuffer
     );
 
-    // Vault PDA -> vault wSOL account (vault-to-vault), then sync so the
-    // token amount reflects the new lamports.
+    // Vault PDA -> vault wSOL account. Vault-to-vault: the destination is
+    // constrained to `token::authority = vault` and the wSOL mint, so this
+    // cannot pay anyone.
+    //
+    // The `sync_native` CPI that used to follow is gone, and wrap_sol has
+    // never worked with it: the runtime verifies the caller's account changes
+    // BEFORE executing a CPI, and a direct lamport credit into an account
+    // owned by the Token program does not survive that check — the
+    // instruction failed "sum of account balances before and after
+    // instruction do not match" with the Token program never logging an
+    // invoke at all.
+    //
+    // Syncing is now the caller's job: append a plain SyncNative instruction
+    // after this one (buildWrapSolIx's caller does). Splitting them is also
+    // the more honest shape — this instruction moves lamports, and telling
+    // the Token program to notice is a separate, permissionless act that
+    // anyone can perform on a native account.
     pay_from_vault(
         &vault_ai,
         &ctx.accounts.wsol_account.to_account_info(),
         amount_lamports,
     )?;
-    sync_native(CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
-        SyncNative {
-            account: ctx.accounts.wsol_account.to_account_info(),
-        },
-    ))?;
     Ok(())
 }
 
