@@ -4,9 +4,13 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "node app.js",
+    "startCommand": "node scripts/prisma-prod.mjs push && tsx apps/api/src/index.ts",
     "healthcheckPath": "/api/health",
-    "healthcheckTimeout": 180,
-    "restartPolicyType": "ON_FAILURE"
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "healthcheckMethod": "GET",
+    "healthcheckHeaders": {
+      "Content-Type": "application/json"
+    }
   }
 }
