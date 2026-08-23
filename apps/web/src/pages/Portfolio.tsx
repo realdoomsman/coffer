@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtSol, type Holding } from "@coffer/shared";
 import { api, type PortfolioView } from "../lib/api";
@@ -43,11 +43,23 @@ interface ShareState {
 export function Portfolio() {
   usePageTitle("Portfolio");
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, wallet } = useAuth();
+
+  // Portfolio is per-caller now: the API returns an empty one rather than the
+  // shared demo account's rows when it cannot identify you.
+  const authTokens = useCallback(async () => {
+    if (!wallet) return undefined;
+    const accessToken = await wallet.getAccessToken();
+    return { accessToken, identityToken: wallet.identityToken };
+  }, [wallet]);
   const [busy, setBusy] = useState<string | null>(null);
   const [sharing, setSharing] = useState<string | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
-  const { data: view, error, setData } = usePoll<PortfolioView>(() => api.portfolio(), 15_000, []);
+  const { data: view, error, setData } = usePoll<PortfolioView>(
+    async () => api.portfolio(await authTokens()),
+    15_000,
+    [wallet?.address],
+  );
 
   useEffect(() => {
     if (!share) return;
@@ -123,7 +135,7 @@ export function Portfolio() {
           ? `Paid ${fmtSol(r.paidSol)} ◎ — profit ${fmtSol(r.fees.profitSol)}, performance fee ${fmtSol(r.fees.perfFeeSol)} (trader ${fmtSol(r.fees.traderFeeSol)} now, ${fmtSol(r.fees.traderVestedSol)} vested)`
           : `Withdrawal paid: ${fmtSol(r.paidSol)} ◎ (worse-of rule, no profit → no fees)`,
       );
-      const fresh = await api.portfolio();
+      const fresh = await api.portfolio(await authTokens());
       setData(fresh);
     } catch (e) {
       toast("bad", e instanceof Error ? e.message : "execution failed");

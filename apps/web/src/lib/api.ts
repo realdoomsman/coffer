@@ -360,8 +360,22 @@ export const api = {
     return { instant: r.mode === "instant", request: r.request, fees: r.fees };
   },
   token: (mint: string) => get<TokenInfo>(`/tokens/${mint}`),
-  portfolio: async (): Promise<PortfolioView> => {
-    const r = await get<{ holdings: Holding[]; withdrawRequests: WithdrawRequest[] }>(`/portfolio`);
+  /**
+   * The caller's own portfolio.
+   *
+   * `tokens` is optional only so demo mode (no Privy) still works. With Privy
+   * configured the API returns an EMPTY portfolio for an unauthenticated
+   * caller rather than the shared demo account's positions, so a signed-in
+   * user who does not send them sees nothing — which is why every call site
+   * passes them.
+   */
+  portfolio: async (tokens?: AuthTokens): Promise<PortfolioView> => {
+    const r = tokens
+      ? await authedFetch<{ holdings: Holding[]; withdrawRequests: WithdrawRequest[] }>(
+          `/portfolio`,
+          tokens,
+        )
+      : await get<{ holdings: Holding[]; withdrawRequests: WithdrawRequest[] }>(`/portfolio`);
     return {
       holdings: r.holdings,
       pendingWithdrawals: r.withdrawRequests.filter((w) => w.status === "pending" || w.status === "executable"),
