@@ -87,7 +87,16 @@ const FEE_HEADROOM_LAMPORTS = 20_000n;
  * one person. Raise with MAX_DEPOSIT_SOL once the code has a track record
  * or an audit.
  */
-const MAX_DEPOSIT_SOL = Number(process.env.MAX_DEPOSIT_SOL ?? (isMainnetCluster() ? 5 : 1_000));
+// A function, not a const. Evaluating this at module load called
+// isMainnetCluster(), which reads a `const` declared further down the file —
+// and `const` is not hoisted, so it threw "Cannot access 'MAINNET_NAMES'
+// before initialization" and the container never became healthy. Deferring
+// to call time removes the ordering dependency entirely.
+function maxDepositSol(): number {
+  const explicit = Number(process.env.MAX_DEPOSIT_SOL);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return isMainnetCluster() ? 5 : 1_000;
+}
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
@@ -242,7 +251,7 @@ onchainRouter.get("/config", async (_req, res, next) => {
       programId: VAULT_PROGRAM_ID.toBase58(),
       rpcUrl: publicRpcUrl(),
       minDepositLamports: MIN_DEPOSIT_LAMPORTS.toString(),
-      maxDepositSol: MAX_DEPOSIT_SOL,
+      maxDepositSol: maxDepositSol(),
       depositorRentLamports: rent,
       feeHeadroomLamports: FEE_HEADROOM_LAMPORTS.toString(),
     });
@@ -295,9 +304,9 @@ onchainRouter.post("/deposit/prepare", async (req, res, next) => {
       res.status(400).json({ error: "sol must be a positive number", code: "bad_amount" });
       return;
     }
-    if (sol > MAX_DEPOSIT_SOL) {
+    if (sol > maxDepositSol()) {
       res.status(400).json({
-        error: `sol exceeds the on-chain deposit ceiling (${MAX_DEPOSIT_SOL})`,
+        error: `sol exceeds the on-chain deposit ceiling (${maxDepositSol()})`,
         code: "bad_amount",
       });
       return;
