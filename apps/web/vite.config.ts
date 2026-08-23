@@ -30,8 +30,14 @@ export default defineConfig({
             if (id.includes("lightweight-charts")) {
               return "charts";
             }
+            // Buffer is a polyfill the Solana code DEPENDS on, so it must
+            // not share a chunk with it — keep it separate so it is always
+            // evaluated first.
+            if (id.includes("/buffer/") || id.includes("node_modules/buffer")) {
+              return "polyfills";
+            }
             // Solana
-            if (id.includes("@solana") || id.includes("buffer")) {
+            if (id.includes("@solana")) {
               return "solana";
             }
             // Auth

@@ -1,0 +1,12 @@
+{
+  "name": "coffer",
+  "description": "Trader vaults on Solana — traders trade pooled capital they can never withdraw",
+  "homepage": "https://coffer.fun",
+  "private": false,
+  "has_issues": true,
+  "has_projects": true,
+  "has_wiki": true,
+  "license": "mit",
+  "auto_init": true,
+  "gitignore_template": "node"
+}

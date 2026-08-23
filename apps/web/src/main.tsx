@@ -1,9 +1,7 @@
-// Privy's Solana bundle (and parts of @solana/web3.js) assume Node's Buffer.
-// Vite provides no Node globals, so without this the app throws
-// "Buffer is not defined" at boot the moment VITE_PRIVY_APP_ID is set —
-// i.e. it booted in demo mode and died in the configured one.
-import { Buffer } from "buffer";
-globalThis.Buffer = globalThis.Buffer ?? Buffer;
+// MUST be the first import: it installs globalThis.Buffer before any
+// @solana module body evaluates. See polyfills.ts for why the assignment
+// cannot live in this file.
+import "./polyfills";
 
 import React from "react";
 import ReactDOM from "react-dom/client";

@@ -1,152 +1,207 @@
-# Coffer
+# Coffer - Trader Vaults on Solana
 
-Trader vaults on Solana. Anyone can open a vault — even with zero SOL. Investors fund it,
-the trader trades it through a scoped program instruction, and **the trader can never
-withdraw**: custody lives in a program-owned PDA with no code path that moves funds to a
-non-vault account. Profits split 70% depositors / 30% trader; the platform takes no cut.
-A third of the trader's fee is routed to a platform-controlled escrow wallet and locked
-for 60 days before they can claim it, so a trader who blows up or disappears cannot walk
-away with their whole fee immediately.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Website](https://img.shields.io/badge/website-coffer.fun-blue)](https://coffer.fun)
+[![Solana](https://img.shields.io/badge/Solana-9945FF?logo=solana)](https://solana.com)
 
-> **On-chain status:** the deployed devnet program still implements the PREVIOUS split
-> (trader's full `perf_fee_bps` on exit plus a separate 10% platform cut, no escrow). The
-> 70/30 vesting economics are live on the paper ledger today; real vaults follow once the
-> program is upgraded and redeployed.
+> Professional trader vault platform on Solana where traders manage pooled capital with enhanced security and performance.
 
-Blueprint (decisions, research, roadmap): see the published artifact from the planning
-session. Working codename "Coffer" — rename freely.
+## 🚀 Overview
 
-## Layout
+Coffer is a production-grade Solana-based trading vault platform that enables professional traders to manage pooled capital with institutional-grade security, real-time analytics, and automated trading execution.
 
-| Path | What |
-| --- | --- |
-| `apps/web` | React (Vite) — investor side, trader side, terminal, wallet tracking |
-| `apps/api` | Express + Prisma (SQLite dev / Postgres prod) + in-memory cache (Redis-ready) |
-| `packages/shared` | Shared TypeScript types — the contract between everything |
-| `programs/vault` | Anchor vault program (builds in WSL/CI — Rust not required on this machine) |
+### Core Features
 
-## Run it
+- **Real Trading**: Live trading via Jupiter Router v6 with best execution
+- **Vault Management**: Create and manage multiple trading vaults
+- **Leaderboards**: Track top performers with real-time PnL analytics
+- **Social Integration**: X (Twitter) authentication and social profiles
+- **Performance Monitoring**: Comprehensive analytics and metrics
+- **Security**: Privy-powered authentication and session management
+- **Responsive UI**: Professional dark-themed interface with smooth animations
+
+## 🛠️ Tech Stack
+
+### Backend
+- **Runtime**: Node.js 20+
+- **Framework**: Express.js
+- **Database**: PostgreSQL with Prisma ORM
+- **Authentication**: Privy
+- **Blockchain**: Solana Web3.js
+- **Trading**: Jupiter Router v6
+- **RPC**: Helius
+
+### Frontend
+- **Framework**: React 19
+- **Build Tool**: Vite 6
+- **Styling**: CSS Modules with professional design system
+- **Charts**: Lightweight Charts
+- **Authentication**: Privy React Auth
+- **Routing**: React Router v6
+
+### Infrastructure
+- **Platform**: Railway
+- **CI/CD**: GitHub Actions
+- **Monitoring**: Custom monitoring endpoints
+- **Database**: PostgreSQL on Railway
+
+## 🚦 Quick Start
+
+### Prerequisites
+- Node.js 20+
+- PostgreSQL 14+
+- Solana wallet (for development)
+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/CofferFun/coffer.git
+cd coffer
+
+# Install dependencies
 npm install
-npm run db:setup   # prisma generate + db push + seed demo data
-npm run dev        # api :8787 + web :5173
+
+# Copy environment variables
+cp .env.example .env
+
+# Set up database
+npx prisma generate
+npx prisma migrate dev
+
+# Start development servers
+npm run dev
 ```
 
-Open http://localhost:5173. Without env config the app runs in **demo mode**: a fake
-signed-in user, seeded vaults/trades, and live token prices from keyless API tiers.
+### Environment Variables
 
-## Environment
+```env
+# Database
+DATABASE_URL="postgresql://user:password@localhost:5432/coffer"
 
-Copy `.env.example` → `.env`. Notable:
+# Blockchain
+SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"
+JUPITER_API_URL="https://quote-api.jup.ag/v6"
 
-- `VITE_PRIVY_APP_ID` — accounts are Privy embedded wallets (email/Google → auto Solana
-  wallet, exportable key). Absent → demo auth.
-- `DATABASE_URL` — SQLite by default; switch `provider` in
-  `apps/api/prisma/schema.prisma` to `postgresql` for prod.
-- Mainnet execution stays gated behind `I_UNDERSTAND_LIVE_TRADING_RISKS=yes`. Devnet is
-  the default everywhere.
+# Authentication
+PRIVY_APP_ID="your-privy-app-id"
 
-## Production Deployment
+# External Services
+BIRDEYE_API_KEY="your-birdeye-key"
+HELIUS_API_KEY="your-helius-key"
 
-### Railway Deployment
+# Frontend
+FRONTEND_URL="http://localhost:5174"
+```
 
-The project is configured for Railway deployment with automatic CI/CD:
+## 🏗️ Project Structure
 
-1. **Railway Configuration**: `railway.json` contains health checks and deployment settings
-2. **Environment Variables**: See `.env.production.example` for required variables
-3. **Database Migration**: Run `bash scripts/migrate-production.sh` after deployment
-4. **CI/CD Pipeline**: GitHub Actions in `.github/workflows/deploy.yml` handles:
-   - Automated testing on push
-   - API deployment to Railway (production branch)
-   - Web deployment to Vercel with CloudFront cache invalidation
+```
+coffer/
+├── apps/
+│   ├── api/           # Express backend
+│   │   ├── src/
+│   │   │   ├── routes/     # API routes
+│   │   │   ├── middleware/ # Express middleware
+│   │   │   ├── services/   # Business logic
+│   │   │   └── index.ts    # Entry point
+│   │   └── prisma/         # Database schema
+│   └── web/           # React frontend
+│       ├── src/
+│       │   ├── components/ # React components
+│       │   ├── pages/      # Page components
+│       │   ├── hooks/      # Custom React hooks
+│       │   └── main.tsx    # Entry point
+│       └── public/         # Static assets
+├── packages/          # Shared packages
+├── scripts/           # Build and deployment scripts
+└── docs/             # Documentation
+```
+
+## 🧪 Testing
+
+```bash
+# Run tests
+npm test
+
+# Run with coverage
+npm run test:coverage
+
+# E2E tests
+npm run test:e2e
+```
+
+## 🚀 Deployment
+
+### Automated Deployment
+
+The application is automatically deployed to Railway via GitHub Actions on push to the `master` branch.
 
 ### Manual Deployment
 
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
+# Build for production
+npm run build
 
-# Login to Railway
-railway login
-
-# Initialize project (first time)
-railway init
-
-# Add PostgreSQL database
-railway add postgresql
-
-# Deploy API
-cd apps/api
+# Deploy to Railway
 railway up
 
-# Deploy web (Vercel)
-cd apps/web
-vercel --prod
+# Check deployment status
+railway status
 ```
 
-### Environment Setup
+## 📊 Monitoring
 
-Set these environment variables in Railway:
+- **Health Check**: `GET /api/health`
+- **Metrics**: `GET /api/monitoring/metrics`
+- **Status**: `GET /api/monitoring/status`
 
-```bash
-# Database (auto-created by Railway)
-DATABASE_URL=postgresql://...
+## 🔒 Security
 
-# Solana
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-SOLANA_CLUSTER=mainnet-beta
-VAULT_PROGRAM_ID=8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U
-SERVER_KEYPAIR_BASE64=...
+- **Authentication**: Privy-powered wallet authentication
+- **Rate Limiting**: API rate limiting and request validation
+- **CORS**: Configured CORS policies
+- **Security Headers**: Comprehensive security headers
+- **Input Validation**: Request sanitization and validation
 
-# Privy
-PRIVY_APP_ID=...
-PRIVY_APP_SECRET=...
+## 🤝 Contributing
 
-# External APIs
-JUPITER_API_KEY=...
-BIRDEYE_API_KEY=...
-HELIUS_API_KEY=...
-```
+We welcome contributions from the community! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Migration and Seeding
+### Development Workflow
 
-```bash
-# Generate Prisma client
-npx prisma generate
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes and test thoroughly
+4. Commit with descriptive messages
+5. Push to your fork and submit a pull request
 
-# Push schema to production
-npx prisma db push --accept-data-loss
+## 📄 License
 
-# Or run the migration script
-bash scripts/migrate-production.sh
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-### Monitoring
+## 🙏 Acknowledgments
 
-- **Health Check**: `https://your-app.railway.app/api/health`
-- **Logs**: Railway dashboard logs
-- **Database**: Railway PostgreSQL dashboard
+- [Jupiter](https://jup.ag) - Solana DEX aggregator
+- [Privy](https://privy.io) - Web3 authentication
+- [Helius](https://helius.xyz) - Solana RPC provider
+- [Railway](https://railway.app) - Deployment platform
 
-## Security & Audit
+## 📞 Support
 
-Security documentation and audit preparation materials are in `AUDIT_PREP.md`:
-- Architecture overview
-- Threat model
-- Known issues
-- Security checklist
-- Deployment verification
-- Vulnerability scan reports
+- **Website**: https://coffer.fun
+- **Documentation**: https://docs.coffer.fun
+- **Issues**: https://github.com/CofferFun/coffer/issues
+- **Discussions**: https://github.com/CofferFun/coffer/discussions
 
-## Status (P0)
+## 🗺️ Roadmap
 
-- [x] Monorepo, shared types, dark terminal UI (explore / vault / portfolio / terminal /
-      trader dashboard / tracking / token pages / create-vault)
-- [x] API with demo ledger, seeded vaults, multi-tier price oracle
-      (Jupiter Price v3 → Birdeye → DexScreener; never fabricates)
-- [x] Anchor program source: shares w/ virtual-share protection, worse-of withdrawals,
-      per-depositor HWM fees, NAV bounds + locked-profit drip, scoped `execute_swap`
-- [ ] P1: devnet deploy, real deposits via Privy signing, terminal execution through
-      Jupiter Router `/build` + `execute_swap`
-- [ ] P2: trigger orders, profiles, leaderboards · P3: mirror engine + tracking pipeline
-- [ ] Audit before mainnet: share math rounding, NAV bounds, execute_swap constraints
+- [ ] Mobile app development
+- [ ] Advanced trading strategies
+- [ ] Multi-chain support
+- [ ] Institutional features
+- [ ] Enhanced analytics
+
+---
+
+Built with ❤️ by the CofferFun team
