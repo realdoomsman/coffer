@@ -84,10 +84,7 @@ export function VaultCard({ vault, className, index = 0 }: VaultCardProps) {
               'transition-all duration-300',
               isHovered ? 'opacity-100' : 'opacity-70'
             )}>
-              <Sparkline
-                points={vault.equityCurve?.slice(-60) || []}
-                className="w-full h-full"
-              />
+              <Sparkline points={vault.equityCurve?.slice(-60) || []} />
             </div>
           </div>
 

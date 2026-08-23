@@ -254,10 +254,52 @@ export function Skeleton({
   );
 }
 
+/**
+ * A table row that fades in, staggered by its index.
+ *
+ * PositionsTable and TradeTape both imported this and it did not exist —
+ * the module had no AnimatedRow export at all, so the app was shipping
+ * with two broken imports that only a typecheck would catch.
+ *
+ * Must render a bare <tr>: a wrapper element between <tbody> and <tr>
+ * is invalid HTML and browsers hoist it out, which silently destroys
+ * the table layout.
+ */
+export function AnimatedRow({
+  children,
+  index = 0,
+  onClick,
+  className,
+}: {
+  children: React.ReactNode;
+  index?: number;
+  onClick?: () => void;
+  className?: string;
+}) {
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return (
+    <tr
+      className={className}
+      onClick={onClick}
+      style={{
+        cursor: onClick ? "pointer" : undefined,
+        // cap the stagger: on a long tape the last rows would otherwise
+        // wait seconds before appearing
+        animation: reduced ? undefined : `rowIn 220ms ease-out ${Math.min(index * 18, 360)}ms both`,
+      }}
+    >
+      {children}
+    </tr>
+  );
+}
+
 export default {
   AnimatedCard,
   AnimatedCounter,
   AnimatedStatus,
   AnimatedBadge,
+  AnimatedRow,
   Skeleton,
 };

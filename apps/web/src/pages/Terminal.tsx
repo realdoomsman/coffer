@@ -109,9 +109,17 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
     if (paramMint && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(paramMint)) setMint(paramMint);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramMint]);
-  const [tf, setTf] = useState<Tf>("5m");
+  // Chart state is deep-linkable: ?tf=1s&quote=SOL&denom=mcap. Sharing a
+  // chart should share what you were actually looking at, not drop the
+  // reader on the default.
+  const paramTf = params.get("tf");
+  const [tf, setTf] = useState<Tf>(
+    TFS.includes(paramTf as Tf) ? (paramTf as Tf) : "5m",
+  );
   const [rail, setRail] = useState<"trade" | "orders" | "dca">("trade");
-  const [denom, setDenom] = useState<"usd" | "mcap">("usd");
+  const [denom, setDenom] = useState<"usd" | "mcap">(
+    params.get("denom") === "mcap" ? "mcap" : "usd",
+  );
   const [supplyUi, setSupplyUi] = useState<number | null>(null);
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("1");
@@ -287,7 +295,9 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
    * Chart quote currency. The vault holds SOL and its PnL is booked in SOL,
    * so on a USD chart a position can look green purely because SOL rallied.
    */
-  const [quote, setQuote] = useState<"USD" | "SOL">("USD");
+  const [quote, setQuote] = useState<"USD" | "SOL">(
+    params.get("quote") === "SOL" ? "SOL" : "USD",
+  );
 
   const [candleVer, setCandleVer] = useState(0);
   /** Chart subject last auto-framed — see the fit guard below. */

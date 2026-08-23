@@ -15,18 +15,21 @@ export const breakpoints = {
 
 export type Breakpoint = keyof typeof breakpoints;
 
+/** '640px' -> 640. The values are authored with units for use in CSS. */
+const bpPx = (b: Breakpoint): number => parseInt(breakpoints[b], 10);
+
 // Media query generators
 export const media = {
   up: (breakpoint: Breakpoint) => `@media (min-width: ${breakpoints[breakpoint]})`,
-  down: (breakpoint: Breakpoint) => `@media (max-width: ${breakpoints[breakpoint] - 1}px)`,
+  down: (breakpoint: Breakpoint) => `@media (max-width: ${bpPx(breakpoint) - 1}px)`,
   between: (min: Breakpoint, max: Breakpoint) => 
-    `@media (min-width: ${breakpoints[min]}) and (max-width: ${breakpoints[max] - 1}px)`,
+    `@media (min-width: ${breakpoints[min]}) and (max-width: ${bpPx(max) - 1}px)`,
   only: (breakpoint: Breakpoint) => {
     const keys = Object.keys(breakpoints) as Breakpoint[];
     const index = keys.indexOf(breakpoint);
     const next = keys[index + 1];
     return next 
-      ? `@media (min-width: ${breakpoints[breakpoint]}) and (max-width: ${breakpoints[next] - 1}px)`
+      ? `@media (min-width: ${breakpoints[breakpoint]}) and (max-width: ${bpPx(next) - 1}px)`
       : media.up(breakpoint);
   },
 };

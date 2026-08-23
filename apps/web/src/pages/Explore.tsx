@@ -3,7 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { fmtPct, fmtSol, type Vault } from "@coffer/shared";
 import { api } from "../lib/api";
 import { VaultCard } from "../components/VaultCard";
-import { CountStat, Delta, Skeleton, TypePill } from "../components/bits";
+import { CountStat, Delta, TypePill } from "../components/bits";
+// NB: two Skeletons exist. bits' takes {h,w,style}; this one takes
+// {variant,height} — which is the API used below.
+import { Skeleton } from "../components/AnimatedComponents";
 import { usePageTitle, usePoll } from "../lib/hooks";
 import { AnimatedCard, AnimatedBadge } from "../components/AnimatedComponents";
 

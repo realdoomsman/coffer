@@ -45,7 +45,7 @@ function setCached<T>(key: string, data: T, ttl: number): void {
 export function useOptimizedFetch<T>({
   fetcher,
   deps = [],
-  initialData = null,
+  initialData = null as T | null,
   cacheKey,
   cacheTTL = 5 * 60 * 1000, // 5 minutes default
   onSuccess,

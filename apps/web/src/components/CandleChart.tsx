@@ -64,14 +64,12 @@ export function CandleChart({
           bottom: 0.2,
         },
       },
-      timeScale: { 
-        borderColor: "#38382f", 
-        timeVisible: true, 
+      // scaleMargins is a price-scale option; it was set on timeScale,
+      // where it is silently meaningless.
+      timeScale: {
+        borderColor: "#38382f",
+        timeVisible: true,
         secondsVisible: false,
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.1,
-        },
       },
       crosshair: { 
         vertLine: { 
