@@ -161,7 +161,12 @@ export function Landing() {
         </section>
 
         <footer className="lfoot">
-          <span>Coffer · trader vaults on Solana · devnet build</span>
+          <span>
+            Coffer · trader vaults on Solana · devnet build ·{" "}
+            <a href="https://x.com/CofferFun" target="_blank" rel="noreferrer" className="flink">
+              𝕏 @CofferFun
+            </a>
+          </span>
           <span>Custody enforced by program. Trading losses are still losses — read every vault's drawdown.</span>
         </footer>
       </div>

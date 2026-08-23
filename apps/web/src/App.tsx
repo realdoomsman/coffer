@@ -244,6 +244,16 @@ export default function App() {
         <Nav to="/paper" hotkey="b" label="Paper trading" />
 
         <div className="spacer" />
+        <a
+          className="xlink"
+          href="https://x.com/CofferFun"
+          target="_blank"
+          rel="noreferrer"
+          title="Coffer on X"
+        >
+          <span className="xglyph" aria-hidden="true">𝕏</span>
+          <span>@CofferFun</span>
+        </a>
         <div className="acctbox">
           <div className="avatar">{user ? user.handle.slice(0, 1).toUpperCase() : "·"}</div>
           <div className="who">

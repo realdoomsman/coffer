@@ -1745,3 +1745,24 @@ tr.rowtracked td {
 @media (prefers-reduced-motion: reduce) {
   @keyframes rowIn { from { opacity: 1; } to { opacity: 1; } }
 }
+
+/* ── X link ─────────────────────────────────────────────────────── */
+/* Sits in the sidebar above the account box, so it is reachable from
+   every route rather than only the landing page. */
+.xlink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+  transition: color 120ms, border-color 120ms;
+}
+.xlink:hover { color: var(--amber); border-color: var(--amber); }
+.xlink .xglyph { font-size: 13px; line-height: 1; }
+
+.lfoot .flink { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+.lfoot .flink:hover { color: var(--amber); border-color: var(--amber); }
