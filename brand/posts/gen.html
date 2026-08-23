@@ -312,6 +312,31 @@ CARDS['18-rewards'] = function (c) {
   c.fillText('balance today: 0 SOL. nothing distributed yet.', 74, y + 18);
 };
 
+CARDS['19-token'] = function (c) {
+  frame(c, 'TOKEN LAUNCH');
+  head(c, [['CREATOR FEES FUND'], ['THE VAULTS.', AMBER]], 240, 72);
+
+  // the flow, stated as a chain so there is no ambiguity about who is paid
+  const y = 520;
+  const box = function (x, w, t, s2, col) {
+    c.strokeStyle = col; c.lineWidth = 2; c.strokeRect(x, y, w, 108);
+    c.font = '700 24px "IBM Plex Mono",monospace'; c.fillStyle = col;
+    c.fillText(t, x + 20, y + 44);
+    c.font = '500 19px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+    c.fillText(s2, x + 20, y + 78);
+  };
+  box(74, 400, 'PUMP.FUN FEE', 'earned on every trade', GREY);
+  box(560, 430, 'FUNDING WALLET', '4MERY...TLSpd (public)', AMBER);
+  box(1080, 444, 'VAULTS', 'under published rules', GREY);
+  c.strokeStyle = MUTED; c.lineWidth = 2;
+  [[474, 560], [990, 1080]].forEach(function (p2) {
+    c.beginPath(); c.moveTo(p2[0], y + 54); c.lineTo(p2[1], y + 54); c.stroke();
+  });
+
+  c.font = '600 23px "IBM Plex Mono",monospace'; c.fillStyle = RED;
+  c.fillText('Not a claim on vault profits. Holding it entitles you to nothing.', 74, y + 190);
+};
+
 // Real 1s candles, fetched live at render time.
 async function candleCard(c) {
   frame(c, '1-SECOND CANDLES');
