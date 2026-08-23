@@ -129,6 +129,20 @@ Measured, not guessed — keep these in product copy:
 
 ## Known bugs / debt
 
+- **`apps/api` has 68 type errors** and `npm run build -w apps/api` is `tsc`,
+  so the API half of the build is red. Pre-existing, from the "production
+  fixes / monitoring" sessions. 39 are in live files (productionFixes 12,
+  monitoring 9, xOAuth 7, logging 4, errorHandler 4, validation 3); 29 are in
+  four orphans with zero references (vaultService 21, queryOptimization 4,
+  errorTracker 3, queriesOptimized 1) which can simply be deleted. Railway's
+  build currently succeeds and the healthcheck passes, so production is fine
+  today — but the local build cannot verify anything until this is cleared.
+  Web was the same story and is now at 0.
+- **Never trust `cd X && npx tsc` in a persistent shell.** The Bash tool keeps
+  its cwd between calls; once already in the target dir the `cd` fails, `&&`
+  short-circuits, and a trailing `; echo "clean"` prints anyway. Use
+  `npx tsc --noEmit --project apps/web/tsconfig.json` from a known root.
+
 - GT free-tier budgeter smooths 429s but a paid key (or Birdeye) is the real fix
 - lightweight-charts region breaks the a11y tree on terminal (cosmetic, affects tooling)
 - usePoll pauses in hidden tabs by design (refetches on visibility) — headless tooling

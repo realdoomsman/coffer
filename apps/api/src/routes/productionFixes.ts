@@ -4,6 +4,18 @@ import { prisma } from '../db.js';
 
 export const productionFixesRouter = Router();
 
+// GET /api/fixes - List available fix endpoints
+productionFixesRouter.get('/', (_req, res) => {
+  res.json({
+    message: 'Production fix endpoints available',
+    endpoints: [
+      'GET /api/fixes/meta - Get fresh platform meta data',
+      'GET /api/fixes/leaderboards/traders - Get trader leaderboard',
+      'GET /api/fixes/leaderboards/vaults - Get vault leaderboard',
+    ]
+  });
+});
+
 // GET /api/fixes/meta - Fix stale meta data
 productionFixesRouter.get('/meta', async (_req, res) => {
   try {

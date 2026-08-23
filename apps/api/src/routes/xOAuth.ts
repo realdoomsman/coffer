@@ -17,9 +17,18 @@ const X_OAUTH_CONFIG = {
 // Simple session storage (in production, use Redis/express-session)
 const oauthSessions = new Map<string, { state: string; userId?: string }>();
 
+// Extend Express Request type to include session
+declare global {
+  namespace Express {
+    interface Request {
+      session?: { state: string; userId?: string };
+    }
+  }
+}
+
 // Session middleware
-function sessionMiddleware(req: Request, res: Response, next: () => void) {
-  const sessionId = req.cookies.session_id;
+function sessionMiddleware(req: any, res: any, next: () => void) {
+  const sessionId = req.cookies?.session_id;
   if (sessionId) {
     req.session = oauthSessions.get(sessionId);
   }
@@ -27,6 +36,21 @@ function sessionMiddleware(req: Request, res: Response, next: () => void) {
 }
 
 xOAuthRouter.use(sessionMiddleware);
+
+/**
+ * GET /api/auth - List available auth endpoints
+ */
+xOAuthRouter.get("/", (_req: Request, res: Response) => {
+  res.json({
+    message: "X OAuth endpoints available",
+    endpoints: [
+      "GET /api/auth/x - Initiate X OAuth flow",
+      "GET /api/auth/x/callback - Handle X OAuth callback",
+      "POST /api/auth/x/disconnect - Disconnect X account",
+      "GET /api/auth/x/status - Get X connection status",
+    ],
+  });
+});
 
 /**
  * GET /api/auth/x
