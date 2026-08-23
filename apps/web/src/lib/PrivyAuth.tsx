@@ -72,12 +72,20 @@ function PrivyBridge({ children }: { children: ReactNode }) {
 }
 
 /**
- * Privy's Solana wallet defaults to mainnet-beta. The vault program lives
- * on devnet, so without this the confirmation modal would quote the wrong
- * chain and Privy's "insufficient funds" top-up flow would look at a
- * mainnet balance for a devnet transaction.
+ * The cluster Privy's wallet UI treats as home.
+ *
+ * This defaulted to "devnet" — written when the program was on devnet, and
+ * left there after it moved. With VITE_SOLANA_CLUSTER unset in production,
+ * every Privy confirmation modal was quoting a devnet chain and a devnet
+ * balance for transactions that spend real mainnet SOL, and Privy's
+ * "insufficient funds" top-up flow was looking at the wrong balance entirely.
+ *
+ * The default is mainnet now. A default that is wrong about which chain the
+ * user's money is on is not a safe default in either direction, but of the
+ * two, guessing "the real one" is the one that does not misrepresent real
+ * funds as play money.
  */
-const CLUSTER = (import.meta.env.VITE_SOLANA_CLUSTER ?? "devnet") as
+const CLUSTER = (import.meta.env.VITE_SOLANA_CLUSTER ?? "mainnet-beta") as
   | "devnet"
   | "testnet"
   | "mainnet-beta";

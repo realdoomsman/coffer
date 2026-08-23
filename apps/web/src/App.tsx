@@ -164,11 +164,25 @@ function SolPrice() {
 export default function App() {
   const { user, demo, login, logout } = useAuth();
   const [apiUp, setApiUp] = useState<boolean | null>(null);
+  // The chip used to read "devnet" unconditionally. It is a label on real
+  // money now, so it comes from the API rather than from a literal.
+  const [cluster, setCluster] = useState("mainnet-beta");
   const [depositOpen, setDepositOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const nav = useNavigate();
   const loc = useLocation();
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .onchainConfig()
+      .then((c) => alive && setCluster(c.cluster))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // a tap that navigates should also put the drawer away
   useEffect(() => setNavOpen(false), [loc.pathname]);
@@ -293,7 +307,7 @@ export default function App() {
           </div>
           <div className="statusdot net" title="Network">
             <span className="dot" />
-            devnet
+            {cluster}
           </div>
           <button
             className="btn ghost sm helpbtn"

@@ -714,7 +714,7 @@ export function Terminal({ mode = "real" }: { mode?: "real" | "paper" }) {
       {!paper && (
         <div className="callout" style={{ marginBottom: 14 }}>
           <strong>Real execution is not live yet.</strong> This terminal never simulates. The vault
-          program is <strong>live on devnet</strong>; buttons switch on once trades are signed
+          program is <strong>live on mainnet</strong>; buttons switch on once trades are signed
           as you (Privy) and the NAV keeper is funded.{" "}
           Want to practice meanwhile? The{" "}
           <Link to="/paper">paper terminal</Link> runs the full engine at live prices, clearly

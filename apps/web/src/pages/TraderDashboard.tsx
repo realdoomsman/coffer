@@ -139,7 +139,7 @@ export function TraderDashboard() {
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "on-chain · devnet" : "paper"}</span>
+            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "on-chain" : "paper"}</span>
             <TypePill type={vault.type} />
             <StatusPill status={vault.status} />
             <span className="dimtx mono" style={{ fontSize: 12 }}>
@@ -191,7 +191,7 @@ export function TraderDashboard() {
             </div>
             <div className="panel panel-pad">
               <div className="sectiontitle" style={{ marginTop: 0 }}>
-                Risk limits <span className="pill neutral" style={{ marginLeft: 6 }}>program defaults — enforced on-chain after devnet deploy</span>
+                Risk limits <span className="pill neutral" style={{ marginLeft: 6 }}>program defaults — enforced on-chain</span>
               </div>
               <div className="kv"><span className="k">Max trade notional</span><span className="v">10% of TVL</span></div>
               <div className="kv"><span className="k">Max price impact</span><span className="v">3%</span></div>

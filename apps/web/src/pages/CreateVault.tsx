@@ -76,7 +76,7 @@ export function CreateVault() {
             <label>Money</label>
             <div className="chipsrow">
               <button type="button" className={`chip ${mode === "real" ? "on" : ""}`} onClick={() => setMode("real")}>
-                on-chain SOL — devnet
+                on-chain SOL
               </button>
               <button type="button" className={`chip ${mode === "paper" ? "on" : ""}`} onClick={() => setMode("paper")}>
                 paper — sandbox

@@ -67,7 +67,9 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
   const [result, setResult] = useState<ConfirmedDeposit | null>(null);
   const [error, setError] = useState<ApiError | Error | null>(null);
 
-  const cluster = config?.cluster ?? "devnet";
+  // Read from the API rather than assumed: the panel used to default to
+  // "devnet" and print it in a pill next to a mainnet deposit form.
+  const cluster = config?.cluster ?? "mainnet-beta";
   const address = wallet?.address ?? null;
 
   // ── cluster + program facts (public, no auth) ─────────────────────
@@ -168,7 +170,7 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
     <div className="sectiontitle" style={{ marginTop: 0 }}>
       Deposit{" "}
       <span className="pill real" style={{ marginLeft: 6 }}>
-        on-chain · devnet
+        on-chain
       </span>
       {config && (
         <span className="pill" style={{ marginLeft: 6 }}>
@@ -196,8 +198,7 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
   if (config.mainnetRefused) {
     return shell(
       <div className="callout red">
-        This build refuses real deposits on <strong>{cluster}</strong>. The vault program has not
-        been audited, so user-signed deposits are devnet-only for now.
+        This build refuses real deposits on <strong>{cluster}</strong>.
       </div>,
     );
   }
@@ -456,8 +457,9 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
 
       <p className="dimtx" style={{ fontSize: 12, marginBottom: 0, marginTop: 12 }}>
         The trader can trade this money but can never withdraw it. Your shares live in a program
-        account whose authority is your key — not ours. Withdrawals are on-chain too and open next;
-        until then, deposit only what you're happy to leave on devnet.
+        account whose authority is your key — not ours, and withdrawals are on-chain too: the
+        Withdraw tab above signs them with the same key. The program has NOT been independently
+        audited, so deposit only what you are willing to lose.
       </p>
     </div>
   );
@@ -480,7 +482,7 @@ function depositErrorHeadline(error: ApiError | Error): string {
     case "withdraw_request_pending":
       return "You have a pending withdrawal";
     case "mainnet_refused":
-      return "Real deposits are devnet-only in this build";
+      return "Real deposits are refused on this cluster";
     case "missing_token":
     case "invalid_token":
     case "wallet_unverified":

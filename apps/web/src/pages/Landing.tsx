@@ -195,7 +195,7 @@ export function Landing() {
 
         <footer className="lfoot">
           <span>
-            Coffer · trader vaults on Solana · devnet build ·{" "}
+            Coffer · trader vaults on Solana ·{" "}
             <a href="https://x.com/CofferFun" target="_blank" rel="noreferrer" className="flink">
               𝕏 @CofferFun
             </a>
