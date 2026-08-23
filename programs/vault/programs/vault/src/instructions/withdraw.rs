@@ -24,7 +24,7 @@
 //!     basis  = net_deposits * shares_withdrawn / depositor_shares   (floor)
 //!     profit = max(0, gross_payout - basis)
 //!     trader fee   = profit * perf_fee_bps / 10_000                 (floor)
-//!     platform fee = profit * PLATFORM_PROFIT_BPS / 10_000          (floor)
+//!     platform fee = 0 — the platform takes no cut of profit
 //!
 //! WHY the deviation: Drift crystallizes unrealized profit on the FULL
 //! position at withdrawal time and settles the fee in shares. With
@@ -143,14 +143,18 @@ fn settle_withdrawal(
         // ROUNDING: floor (fee paid from proceeds; can only undercharge dust).
         math::mul_bps_floor(profit, vault.perf_fee_bps)
     };
-    let platform_fee = math::mul_bps_floor(profit, PLATFORM_PROFIT_BPS);
+    // THE PLATFORM TAKES NOTHING.
+    //
+    // This used to charge PLATFORM_PROFIT_BPS (10%) on top of the trader's
+    // fee, so a 30% vault left the depositor 60% of profit while the site
+    // and every public post said 70%. The published terms are now what the
+    // program enforces: depositor keeps gross minus the trader's fee, and
+    // nothing else is taken.
+    let platform_fee: u64 = 0;
 
-    // perf_fee_bps <= 3000 and PLATFORM_PROFIT_BPS = 1000, so fees <= 40% of
-    // profit <= gross; both subtractions are safe but stay checked anyway.
+    // perf_fee_bps <= 3000, so the fee is at most 30% of profit <= gross.
     let payout = gross
         .checked_sub(trader_fee)
-        .ok_or(VaultError::MathOverflow)?
-        .checked_sub(platform_fee)
         .ok_or(VaultError::MathOverflow)?;
 
     // -- depositor bookkeeping ---------------------------------------------
