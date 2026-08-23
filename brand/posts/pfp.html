@@ -1,0 +1,28 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>body{background:#141414;margin:0;padding:16px}canvas{background:#000}</style></head><body>
+<canvas id="p" width="400" height="400"></canvas>
+<script>
+// Reproduction of the supplied profile mark, from the same band ratios the
+// banner and post cards use, so all three are literally the same geometry.
+const INK="#000000",GREY="#3c3c3c",AMBER="#f9a81b",GOLD="#a87d22";
+const BANDS=[[1,.82,GREY],[.82,.63,AMBER],[.63,.52,INK],[.52,.44,AMBER],[.44,.19,GOLD],[.19,0,INK]];
+const c=document.getElementById('p').getContext('2d');
+const S=400,M=S/2;
+c.fillStyle=INK;c.fillRect(0,0,S,S);
+// X crops avatars to a circle, so the outermost band runs to the very edge —
+// nothing is left outside the crop to be sliced.
+const R=M;
+for(const b of BANDS){
+  c.beginPath();c.arc(M,M,R*b[0],0,7);
+  if(b[1]>0){c.moveTo(M+R*b[1],M);c.arc(M,M,R*b[1],0,7,true);}
+  c.fillStyle=b[2];c.fill("evenodd");
+}
+// soft bevel on the outer ring, matching the original
+const g=c.createLinearGradient(0,0,S*0.7,S);
+g.addColorStop(0,"rgba(255,255,255,0.18)");
+g.addColorStop(0.4,"rgba(255,255,255,0)");
+c.beginPath();c.arc(M,M,R,0,7);c.moveTo(M+R*0.82,M);c.arc(M,M,R*0.82,0,7,true);
+c.fillStyle=g;c.fill("evenodd");
+window.__pfp=document.getElementById('p').toDataURL('image/png');
+window.__ready=true;
+</script></body></html>

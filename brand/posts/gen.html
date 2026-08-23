@@ -1,0 +1,325 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{background:#141414;margin:0;padding:12px;font-family:monospace;color:#ccc}
+canvas{display:block;margin:6px 0;width:520px;border:1px solid #333}
+.n{font-size:11px;color:#888;margin-top:10px}</style></head><body>
+<div id="out"></div>
+<script>
+// Post cards for @CofferFun. 1600x900 so X never has to upscale.
+// Palette and ring geometry are taken from the profile picture, so a card
+// in a timeline is recognisably the same brand as the avatar beside it.
+const W = 1600, H = 900;
+const INK = "#000000", GREY = "#3c3c3c", AMBER = "#f9a81b", GOLD = "#a87d22",
+      TEXT = "#ffffff", MUTED = "#8c8c8c", LINE = "#2e2e2e",
+      GREEN = "#2fd980", RED = "#ff4f58";
+const BANDS = [[1,.82,GREY],[.82,.63,AMBER],[.63,.52,INK],[.52,.44,AMBER],[.44,.19,GOLD],[.19,0,INK]];
+
+function rings(c, cx, cy, R, a) {
+  c.save(); c.globalAlpha = a === undefined ? 1 : a;
+  for (const b of BANDS) {
+    c.beginPath(); c.arc(cx, cy, R * b[0], 0, 7);
+    if (b[1] > 0) { c.moveTo(cx + R * b[1], cy); c.arc(cx, cy, R * b[1], 0, 7, true); }
+    c.fillStyle = b[2]; c.fill("evenodd");
+  }
+  c.restore();
+}
+
+function frame(c, kicker) {
+  c.fillStyle = INK; c.fillRect(0, 0, W, H);
+  c.fillStyle = "rgba(255,255,255,.045)";
+  for (let y = 16; y < H; y += 32) for (let x = 16; x < W; x += 32) { c.beginPath(); c.arc(x, y, 1.6, 0, 7); c.fill(); }
+  c.fillStyle = AMBER; c.fillRect(0, 0, 11, H);
+  rings(c, 1470, 120, 74, 1);
+  c.font = '600 22px "IBM Plex Mono",monospace'; c.letterSpacing = '6px';
+  c.fillStyle = AMBER; c.textAlign = 'left'; c.fillText(kicker, 74, 92); c.letterSpacing = '0px';
+  c.font = '600 22px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('coffer.fun', 74, H - 58);
+}
+
+function head(c, lines, y0, size) {
+  size = size || 78;
+  c.font = '700 ' + size + 'px "Space Mono",monospace'; c.textAlign = 'left';
+  lines.forEach(function (l, i) { c.fillStyle = l[1] || TEXT; c.fillText(l[0], 74, y0 + i * (size + 16)); });
+}
+
+function body(c, lines, y0, size, color) {
+  size = size || 27;
+  c.font = '500 ' + size + 'px "IBM Plex Mono",monospace';
+  c.fillStyle = color || MUTED; c.textAlign = 'left';
+  lines.forEach(function (l, i) { c.fillText(l, 74, y0 + i * (size + 17)); });
+}
+
+function chip(c, x, y, label, val, col) {
+  c.font = '600 25px "IBM Plex Mono",monospace';
+  const w = c.measureText(label + '  ' + val).width + 44;
+  c.strokeStyle = LINE; c.lineWidth = 1.5; c.strokeRect(x + .5, y + .5, w, 58);
+  c.fillStyle = MUTED; c.fillText(label, x + 22, y + 38);
+  const lw = c.measureText(label + '  ').width;
+  c.fillStyle = col || TEXT; c.fillText(val, x + 22 + lw, y + 38);
+  return x + w + 16;
+}
+
+const CARDS = {};
+
+CARDS['01-hero'] = function (c) {
+  frame(c, 'TRADER VAULTS ON SOLANA');
+  head(c, [['BACK THE BEST'], ['TRADERS.'], ['THEY CAN NEVER RUN.', AMBER]], 300, 86);
+  body(c, ['Deposit into any vault. The trader trades it.', 'The program will not let them withdraw it.'], 690);
+};
+
+CARDS['02-custody'] = function (c) {
+  frame(c, 'CUSTODY');
+  head(c, [['THE TRADER CANNOT'], ['WITHDRAW.', AMBER]], 250, 80);
+  const y = 560, bw = 330, h = 110;
+  function box(x, t, s, col) {
+    c.strokeStyle = col; c.lineWidth = 2; c.strokeRect(x, y, bw, h);
+    c.font = '700 27px "IBM Plex Mono",monospace'; c.fillStyle = col; c.fillText(t, x + 22, y + 45);
+    c.font = '500 21px "IBM Plex Mono",monospace'; c.fillStyle = MUTED; c.fillText(s, x + 22, y + 80);
+  }
+  box(74, 'DEPOSITOR', 'sends SOL', GREY);
+  box(524, 'VAULT PDA', 'program-owned', AMBER);
+  box(974, 'TRADER', 'swap only', GREY);
+  c.strokeStyle = MUTED; c.lineWidth = 2;
+  [[404, 524], [854, 974]].forEach(function (p) { c.beginPath(); c.moveTo(p[0], y + 55); c.lineTo(p[1], y + 55); c.stroke(); });
+  c.font = '600 24px "IBM Plex Mono",monospace'; c.fillStyle = RED;
+  c.fillText('no code path moves funds to a non-vault account', 74, y + 185);
+};
+
+CARDS['03-split'] = function (c) {
+  frame(c, 'PERFORMANCE FEE');
+  head(c, [['70% OF PROFIT'], ['TO DEPOSITORS.', AMBER]], 250, 80);
+  const x = 74, y = 540, w = 1450, h = 76;
+  c.fillStyle = AMBER; c.fillRect(x, y, w * .70, h);
+  c.fillStyle = GOLD; c.fillRect(x + w * .70, y, w * .20, h);
+  c.fillStyle = GREY; c.fillRect(x + w * .90, y, w * .10, h);
+  c.font = '700 26px "IBM Plex Mono",monospace'; c.fillStyle = INK;
+  c.fillText('70%  DEPOSITORS', x + 24, y + 48);
+  c.fillText('20% TRADER', x + w * .70 + 20, y + 48);
+  c.fillStyle = TEXT; c.font = '700 22px "IBM Plex Mono",monospace';
+  c.fillText('10%', x + w * .90 + 18, y + 46);
+  body(c, ['The platform takes no cut of profit.', 'A third of the trader fee is escrowed for 60 days.'], 700);
+};
+
+CARDS['04-vesting'] = function (c) {
+  frame(c, 'FEE VESTING');
+  head(c, [['A THIRD OF THE FEE'], ['LOCKS FOR 60 DAYS.', AMBER]], 250, 74);
+  const x = 74, y = 580, w = 1440;
+  c.strokeStyle = AMBER; c.lineWidth = 3;
+  c.beginPath(); c.moveTo(x, y); c.lineTo(x + w, y); c.stroke();
+  [[0, 'EXIT', '20% paid'], [1, '+60 DAYS', '10% claimable']].forEach(function (m) {
+    const px = x + m[0] * w;
+    c.fillStyle = AMBER; c.beginPath(); c.arc(px, y, 13, 0, 7); c.fill();
+    c.font = '700 27px "IBM Plex Mono",monospace'; c.fillStyle = TEXT;
+    c.textAlign = m[0] ? 'right' : 'left'; c.fillText(m[1], px, y - 38);
+    c.font = '500 22px "IBM Plex Mono",monospace'; c.fillStyle = MUTED; c.fillText(m[2], px, y + 50);
+  });
+  c.textAlign = 'left';
+  body(c, ['A trader who blows up cannot walk with the whole fee on day one.'], 740);
+};
+
+CARDS['06-gaps'] = function (c) {
+  frame(c, 'TRADE-TIME BARS');
+  head(c, [['A 1s BAR EXISTS ONLY'], ['IF THAT SECOND TRADED.', AMBER]], 240, 62);
+  const x = 74, y = 470, bw = 26, gap = 12;
+  let px = x;
+  const pat = [1,1,0,1,0,0,1,1,1,0,1,0,0,0,1,1,0,1,1,0,0,1,0,1,1,1,0,0,1,0];
+  pat.forEach(function (on, i) {
+    if (on) {
+      const hh = 40 + ((i * 37) % 110);
+      c.fillStyle = i % 3 ? GREEN : RED;
+      c.fillRect(px, y + 120 - hh / 2, bw, hh);
+    } else {
+      c.strokeStyle = "#1c1c1c"; c.lineWidth = 1; c.setLineDash([4, 6]);
+      c.beginPath(); c.moveTo(px + bw / 2, y + 40); c.lineTo(px + bw / 2, y + 200); c.stroke();
+      c.setLineDash([]);
+    }
+    px += bw + gap;
+  });
+  body(c, ['Dotted = a second where nothing traded.', '',
+           'We could forward-fill flat bars to make the axis pretty.',
+           'On our own default token that fabricates ~94% of the chart.', '',
+           'So there are gaps. The gaps are the truth.'], 720, 25);
+};
+
+CARDS['07-noconnect'] = function (c) {
+  frame(c, 'ACCOUNTS');
+  head(c, [['NO WALLET CONNECT.'], ['JUST SIGN UP.', AMBER]], 270, 72);
+  let x = 74; const y = 560;
+  x = chip(c, x, y, 'sign in', 'email / Google', TEXT);
+  x = chip(c, x, y, 'you get', 'a real Solana wallet', AMBER);
+  x = chip(c, x, y, 'keys', 'exportable, yours', TEXT);
+  body(c, ['The custody story does not work if we hold your keys.', 'So we do not.'], 720);
+};
+
+CARDS['08-paper'] = function (c) {
+  frame(c, 'THE WALL');
+  head(c, [['PAPER IS A SANDBOX'], ['AND SAYS SO.', AMBER]], 250, 74);
+  const y = 540, h = 150;
+  c.strokeStyle = AMBER; c.lineWidth = 2; c.strokeRect(74, y, 690, h);
+  c.strokeStyle = GREY; c.strokeRect(834, y, 690, h);
+  c.font = '700 30px "IBM Plex Mono",monospace';
+  c.fillStyle = AMBER; c.fillText('REAL VAULTS', 100, y + 52);
+  c.fillStyle = MUTED; c.fillText('PAPER VAULTS', 860, y + 52);
+  c.font = '500 22px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('on-chain. never simulated.', 100, y + 95);
+  c.fillText('ledger entries at live prices.', 860, y + 95);
+  c.fillText('counts toward the record.', 100, y + 128);
+  c.fillText('never touches a real record.', 860, y + 128);
+  body(c, ['A track record you can fake is not a track record.'], 760);
+};
+
+CARDS['09-denom'] = function (c) {
+  frame(c, 'DENOMINATION');
+  head(c, [['YOUR BOOK IS IN SOL.'], ['SO THE CHART CAN BE.', AMBER]], 270, 64);
+  let x = 74; const y = 560;
+  x = chip(c, x, y, 'USD', '$0.192', TEXT);
+  x = chip(c, x, y, 'SOL', '0.00207', AMBER);
+  x = chip(c, x, y, 'MCAP', '$173.7M', TEXT);
+  body(c, ['On a USD chart a position can look green purely because SOL rallied.',
+           'That misstates the trader PnL every time SOL itself moves.'], 720);
+};
+
+CARDS['10-timeframes'] = function (c) {
+  frame(c, 'TIMEFRAMES');
+  head(c, [['SEVEN TIMEFRAMES.'], ['THREE BELOW A MINUTE.', AMBER]], 260, 64);
+  const tfs = ['1s', '15s', '30s', '1m', '5m', '15m', '1h'];
+  let x = 74; const y = 560;
+  tfs.forEach(function (t, i) {
+    const on = i < 3;
+    c.font = '700 34px "IBM Plex Mono",monospace';
+    const w = c.measureText(t).width + 58;
+    c.fillStyle = on ? AMBER : INK; c.fillRect(x, y, w, 76);
+    c.strokeStyle = on ? AMBER : LINE; c.lineWidth = 2; c.strokeRect(x + .5, y + .5, w, 76);
+    c.fillStyle = on ? INK : MUTED; c.fillText(t, x + 29, y + 51);
+    x += w + 14;
+  });
+  body(c, ['Memecoin entries are decided under a minute.', 'pump.fun serves 1s / 15s / 30s natively.'], 720);
+};
+
+CARDS['11-status'] = function (c) {
+  frame(c, 'STATUS');
+  head(c, [['WHAT IS ACTUALLY LIVE.', AMBER]], 230, 58);
+  const rows = [['vault program', 'deployed to devnet, executing', 1],
+                ['deposits', 'real, depositor-signed', 1],
+                ['charts + discovery', 'live', 1],
+                ['paper terminal', 'live', 1],
+                ['live trading', 'not yet', 0],
+                ['withdrawals', 'not yet', 0],
+                ['audit', 'before mainnet, not after', 0]];
+  let y = 330;
+  rows.forEach(function (r) {
+    c.font = '700 27px "IBM Plex Mono",monospace'; c.fillStyle = r[2] ? GREEN : RED;
+    c.fillText(r[2] ? 'YES' : 'NO', 74, y);
+    c.fillStyle = TEXT; c.fillText(r[0], 180, y);
+    c.font = '500 25px "IBM Plex Mono",monospace'; c.fillStyle = MUTED; c.fillText(r[1], 640, y);
+    y += 58;
+  });
+  body(c, ['Building in public means saying the second half too.'], y + 18, 25);
+};
+
+CARDS['12-program'] = function (c) {
+  frame(c, 'ON-CHAIN');
+  head(c, [['THE PROGRAM IS'], ['DEPLOYED AND PROVEN.', AMBER]], 250, 70);
+  c.font = '600 25px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('devnet program id', 74, 540);
+  c.font = '700 34px "IBM Plex Mono",monospace'; c.fillStyle = AMBER;
+  c.fillText('8315nL9tGA3TdYC6jr2jRiB1cc', 74, 600);
+  c.fillText('DepRKdXpBVmNybtW2U', 74, 650);
+  body(c, ['Its state decodes exactly as the source describes.',
+           'Professional audit before mainnet, not after.'], 740);
+};
+
+CARDS['13-hwm'] = function (c) {
+  frame(c, 'FEE MATH');
+  head(c, [['YOU PAY A FEE ONCE'], ['ON THE SAME GAIN.', AMBER]], 250, 70);
+  const x = 74, y = 490, w = 1420, h = 210;
+  c.strokeStyle = LINE; c.lineWidth = 1.5; c.strokeRect(x + .5, y + .5, w, h);
+  const pts = [[0,.55],[.15,.75],[.3,.42],[.45,.62],[.6,.88],[.75,.66],[1,.95]];
+  c.strokeStyle = AMBER; c.lineWidth = 3; c.beginPath();
+  pts.forEach(function (p, i) {
+    const X = x + p[0] * w, Y = y + h - p[1] * h;
+    if (i) c.lineTo(X, Y); else c.moveTo(X, Y);
+  });
+  c.stroke();
+  c.strokeStyle = MUTED; c.setLineDash([8, 8]); c.lineWidth = 2;
+  c.beginPath(); c.moveTo(x, y + h - .75 * h); c.lineTo(x + w, y + h - .75 * h); c.stroke();
+  c.setLineDash([]);
+  c.font = '600 22px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('high-water mark', x + w - 260, y + h - .75 * h - 14);
+  body(c, ['Charged per depositor, above their own high-water mark,',
+           'and only on realised profit. Lose it and make it back?',
+           'No fee on the recovery.'], 770, 25);
+};
+
+CARDS['15-why'] = function (c) {
+  frame(c, 'THE NAME');
+  rings(c, 1180, 470, 300, 1);
+  head(c, [['COFFER'], ['a strongbox', AMBER]], 340, 80);
+  body(c, ['Custody lives in the program.', 'Not with the trader. Not with us.'], 620);
+};
+
+CARDS['16-stack'] = function (c) {
+  frame(c, 'DATA');
+  head(c, [['EVERY NUMBER HAS'], ['A NAMED SOURCE.', AMBER]], 250, 70);
+  const rows = [['candles', 'pump.fun swap-api'], ['price', 'Jupiter, DexScreener'],
+                ['chain state', 'Helius RPC'], ['discovery', 'pump.fun bonding data']];
+  let y = 560;
+  rows.forEach(function (r) {
+    c.font = '700 27px "IBM Plex Mono",monospace'; c.fillStyle = TEXT; c.fillText(r[0], 74, y);
+    c.font = '500 25px "IBM Plex Mono",monospace'; c.fillStyle = AMBER; c.fillText(r[1], 420, y);
+    y += 58;
+  });
+  body(c, ['If a source fails we show a stale pill.', 'We never fabricate a price.'], y + 24, 25);
+};
+
+// Real 1s candles, fetched live at render time.
+async function candleCard(c) {
+  frame(c, '1-SECOND CANDLES');
+  head(c, [['REAL 1s BARS.', AMBER]], 200, 62);
+  let rows = [];
+  try {
+    const r = await fetch('https://coffer.fun/api/ohlcv/9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump?tf=1s');
+    rows = (await r.json()).candles || [];
+  } catch (e) { /* drawn as unavailable below */ }
+  rows = rows.slice(-70);
+  if (rows.length > 4) {
+    const lo = Math.min.apply(null, rows.map(function (r) { return r.l; }));
+    const hi = Math.max.apply(null, rows.map(function (r) { return r.h; }));
+    const x0 = 74, y0 = 290, w = 1450, h = 420, sp = w / rows.length;
+    const Y = function (v) { return y0 + h - ((v - lo) / (hi - lo || 1)) * h; };
+    rows.forEach(function (r, i) {
+      const cx = x0 + i * sp + sp / 2, up = r.c >= r.o;
+      c.strokeStyle = up ? GREEN : RED; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(cx, Y(r.h)); c.lineTo(cx, Y(r.l)); c.stroke();
+      c.fillStyle = up ? GREEN : RED;
+      const t = Math.min(Y(r.o), Y(r.c)), bh = Math.max(2, Math.abs(Y(r.o) - Y(r.c)));
+      c.fillRect(cx - sp * 0.32, t, sp * 0.64, bh);
+    });
+    body(c, [rows.length + ' one-second bars, live from pump.fun right now.',
+             'Not contiguous: a bar exists only for a second that traded.'], 750, 25);
+  } else {
+    body(c, ['(no candles available at render time)'], 400);
+  }
+}
+
+(async function () {
+  const fonts = ['700 86px "Space Mono"', '700 27px "IBM Plex Mono"', '500 25px "IBM Plex Mono"'];
+  for (const f of fonts) await document.fonts.load(f);
+  await document.fonts.ready;
+  const out = document.getElementById('out');
+  const made = {};
+  async function mk(name, fn) {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const c = cv.getContext('2d');
+    await fn(c);
+    out.insertAdjacentHTML('beforeend', '<div class="n">' + name + '</div>');
+    out.appendChild(cv);
+    made[name] = cv.toDataURL('image/png');
+  }
+  for (const k of Object.keys(CARDS)) await mk(k, CARDS[k]);
+  await mk('05-candles', candleCard);
+  window.__cards = made;
+  window.__ready = true;
+})();
+</script></body></html>
