@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 interface FetchOptions<T> {
   fetcher: () => Promise<T>;
   deps?: any[];
-  initialData?: T;
+  /** State is `T | null` until the first fetch lands, so this admits null. */
+  initialData?: T | null;
   cacheKey?: string;
   cacheTTL?: number;
   onSuccess?: (data: T) => void;
@@ -45,7 +46,7 @@ function setCached<T>(key: string, data: T, ttl: number): void {
 export function useOptimizedFetch<T>({
   fetcher,
   deps = [],
-  initialData = null as T | null,
+  initialData = null,
   cacheKey,
   cacheTTL = 5 * 60 * 1000, // 5 minutes default
   onSuccess,
