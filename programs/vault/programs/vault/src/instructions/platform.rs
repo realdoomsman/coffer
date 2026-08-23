@@ -93,6 +93,15 @@ pub fn handle_set_kill_switch(ctx: Context<AdminPlatformOp>, on: bool) -> Result
 /// platform restores liveness by rotating to a working keeper.
 pub fn handle_set_nav_keeper(ctx: Context<SetNavKeeper>, new_keeper: Pubkey) -> Result<()> {
     require!(new_keeper != Pubkey::default(), VaultError::InvalidParameter);
+    // FIX — the liveness argument above justifies rotating a DEAD keeper back
+    // to the platform. It does not justify pointing a live vault's pricing at
+    // an arbitrary key: admin could name any address and drain that vault
+    // through the same NAV path a creator could. Rotation is now only ever
+    // TO the admin, which is the one key already trusted to price books.
+    require!(
+        new_keeper == ctx.accounts.platform_config.admin,
+        VaultError::Unauthorized
+    );
     ctx.accounts.vault.nav_keeper = new_keeper;
     Ok(())
 }

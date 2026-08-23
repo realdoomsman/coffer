@@ -83,7 +83,19 @@ pub fn handle_init_vault(ctx: Context<InitVault>, params: InitVaultParams) -> Re
         params.daily_loss_limit_bps as u128 <= BPS_DENOMINATOR,
         VaultError::InvalidParameter
     );
-    require!(params.nav_keeper != Pubkey::default(), VaultError::InvalidParameter);
+    // CRITICAL FIX — the creator may not appoint their own NAV keeper.
+    //
+    // init_vault is permissionless, and NAV is the sole input to payout
+    // pricing. A creator who names themselves keeper can mark their own book
+    // up and withdraw the whole vault, including other people's deposits.
+    // Validating only against Pubkey::default() was no validation at all.
+    //
+    // The keeper is now the platform admin, unconditionally. The parameter is
+    // ignored rather than removed so the instruction layout does not change.
+    require!(
+        params.nav_keeper == ctx.accounts.platform_config.admin,
+        VaultError::Unauthorized
+    );
     require!(params.seed_lamports >= MIN_SEED_LAMPORTS, VaultError::SeedTooSmall);
 
     // ---- burned seed deposit ---------------------------------------------

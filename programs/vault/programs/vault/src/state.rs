@@ -74,6 +74,13 @@ pub const MIN_DEPOSIT_LAMPORTS: u64 = 1_000;
 pub const MIN_PERF_FEE_BPS_AT_INIT: u16 = 1_000;
 pub const MAX_PERF_FEE_BPS: u16 = 3_000;
 
+/// Most of a vault's equity that one swap may spend, in bps.
+///
+/// Stands in for a price oracle. min_out is chosen by the same party that
+/// chooses the route, so it bounds nothing on its own; this bounds the RATE
+/// at which a bad route can drain a vault. 500 bps = 5% per trade.
+pub const MAX_SWAP_EQUITY_BPS: u16 = 500;
+
 pub const SECONDS_PER_DAY: i64 = 86_400;
 pub const MAX_REDEEM_WINDOW_SECONDS: i64 = 30 * SECONDS_PER_DAY;
 pub const MAX_UNLOCK_PERIOD_SECONDS: i64 = 7 * SECONDS_PER_DAY;

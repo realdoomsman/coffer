@@ -49,6 +49,18 @@ pub fn handle_post_nav(ctx: Context<PostNav>, nav_lamports: u64, mark_slot: u64)
     );
     require!(nav_lamports <= MAX_NAV_LAMPORTS, VaultError::NavCapExceeded);
 
+    // CRITICAL FIX — the delta cap needs a time dimension.
+    //
+    // Nothing required the clock to advance between posts, only that
+    // mark_slot increase. So N posts could land in a single slot, each one
+    // capped individually, alternating gain and loss to ratchet effective
+    // equity toward zero and drain the vault. A cap per post is only a cap
+    // per unit time if time is forced to pass.
+    require!(
+        now > vault.nav_posted_at,
+        VaultError::NavSlotNotMonotonic
+    );
+
     // ---- per-post delta cap ----------------------------------------------
     let old_nav = vault.nav_lamports;
     let delta_cap = crate::math::mul_bps_floor(old_nav, vault.max_nav_delta_bps);

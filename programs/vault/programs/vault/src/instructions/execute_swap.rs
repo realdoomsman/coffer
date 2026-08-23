@@ -216,6 +216,25 @@ pub fn handle_execute_swap<'c: 'info, 'info>(
         .ok_or(VaultError::SlippageExceeded)?;
     require!(out_delta >= min_out, VaultError::SlippageExceeded);
 
+    // MITIGATION — min_out is supplied by the same party that supplies the
+    // route, so on its own it bounds nothing: a trader can pass min_out = 1
+    // and route the vault's SOL into a pool they own.
+    //
+    // A complete fix needs a price oracle to know what the output is WORTH,
+    // which this program does not have. What it can do without one is bound
+    // the rate: when the vault is spending wSOL, refuse to spend more than
+    // MAX_SWAP_EQUITY_BPS of equity in a single trade. That does not make a
+    // bad trade impossible; it makes draining the vault take many trades,
+    // each one a separate on-chain record, instead of one.
+    //
+    // This is a rate limit standing in for a price check. It should be
+    // replaced by an oracle bound, and this comment should not outlive it.
+    if ctx.accounts.source_token.mint == WSOL_MINT {
+        let equity = ctx.accounts.vault.effective_equity(Clock::get()?.unix_timestamp);
+        let per_swap_cap = crate::math::mul_bps_floor(equity, MAX_SWAP_EQUITY_BPS);
+        require!(in_delta <= per_swap_cap, VaultError::MaxInExceeded);
+    }
+
     // Per-trade notional cap, measured on whichever leg is wSOL. Note that
     // capping the receive side too means unwinding an oversized position
     // takes multiple trades — accepted: predictable clip sizes are the point.
