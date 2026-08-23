@@ -289,6 +289,29 @@ CARDS['17-github'] = function (c) {
   });
 };
 
+CARDS['18-rewards'] = function (c) {
+  frame(c, 'VAULT FUNDING WALLET');
+  head(c, [['PUBLISHED BEFORE'], ['IT HOLDS ANYTHING.', AMBER]], 210, 62);
+  c.font = '600 22px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('pump.fun creator rewards land here, then fund vaults', 74, 400);
+  c.font = '700 30px "IBM Plex Mono",monospace'; c.fillStyle = AMBER;
+  c.fillText('4MERYBFWdz37zr13AyrntYtZ', 74, 456);
+  c.fillText('DxdbZhdzvAxFuXiTLSpd', 74, 496);
+
+  const rows = [['14 days', 'minimum vault age'],
+                ['3+', 'depositors who are not the trader'],
+                ['25% / 35%', 'cap per vault / per trader'],
+                ['per-share', 'scored on return, not on TVL']];
+  let y = 580;
+  rows.forEach(function (r) {
+    c.font = '700 25px "IBM Plex Mono",monospace'; c.fillStyle = TEXT; c.fillText(r[0], 74, y);
+    c.font = '500 23px "IBM Plex Mono",monospace'; c.fillStyle = MUTED; c.fillText(r[1], 330, y);
+    y += 46;
+  });
+  c.font = '600 23px "IBM Plex Mono",monospace'; c.fillStyle = RED;
+  c.fillText('balance today: 0 SOL. nothing distributed yet.', 74, y + 18);
+};
+
 // Real 1s candles, fetched live at render time.
 async function candleCard(c) {
   frame(c, '1-SECOND CANDLES');
