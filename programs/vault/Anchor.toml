@@ -6,11 +6,16 @@ anchor_version = "0.30.1"
 resolution = true
 skip-lint = false
 
+# The real program id, matching declare_id! in programs/vault/src/lib.rs and
+# PROGRAM_ID.txt. It used to be Anchor's placeholder here while the other two
+# said 8315nL9t… — and lib.rs's own comment warns that a program-id mismatch
+# fails at RUNTIME, not at build time. scripts/checks/program-id.mjs asserts
+# all three agree.
 [programs.localnet]
-# Placeholder program id — run `anchor keys sync` after the first `anchor build`
-# to replace this (and the declare_id! in programs/vault/src/lib.rs) with the
-# real keypair-derived address.
-vault = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+vault = "8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U"
+
+[programs.mainnet]
+vault = "8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U"
 
 [registry]
 url = "https://api.apr.dev"

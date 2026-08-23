@@ -16,11 +16,17 @@ says exactly what is done, what is missing, and who has to do it.
 | Deploy script | `scripts/deploy-devnet.sh` — one command |
 | Security blockers H1/H2 | **fixed in source** (see `programs/vault/REVIEW-FINDINGS.md`) |
 
-## 1. Program — DEPLOYED TO DEVNET ✅
+## 1. Program — DEPLOYED TO MAINNET
 
-Program id `8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U`, 532,088 bytes,
-upgrade authority `7UxfASUxKNkmTcJyiibRkxSiQ963qHg7ywrtEYumgKVk`.
-https://explorer.solana.com/address/8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U?cluster=devnet
+Program id `8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U`.
+https://explorer.solana.com/address/8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U
+
+**The authoritative record — cluster, upgrade authority, PDAs, deploy
+signatures and the sha256 of each deployed `.so` — is
+[docs/DEPLOYMENTS.md](DEPLOYMENTS.md).** This section used to name devnet and
+upgrade authority `7UxfASUx…`; both were wrong, and a record that is wrong
+about the cluster and the key is worse than no record. Deploy facts live in
+one file so there is one thing to keep true.
 
 Built natively on Windows (no WSL — its virtualization gate never cleared):
 MSVC Build Tools + Windows SDK, with `LIB` set to the MSVC and SDK lib

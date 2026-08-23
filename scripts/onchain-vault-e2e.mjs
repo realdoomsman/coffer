@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Coffer vault E2E — proves the API's on-chain client drives the DEPLOYED
- * program end to end on devnet: create → deposit → decode → mark.
+ * program end to end: create → deposit → decode → mark. Point
+ * SOLANA_RPC_URL at whichever cluster you mean to spend on.
  *
  * It deliberately imports the REAL API modules (apps/api/src/services/
  * program.ts + signer.ts) rather than re-implementing the encoders here.
@@ -59,6 +60,7 @@ import {
   getConfirmedSlot,
   getConnection,
   getLamports,
+  getNavKeeperKeypair,
   getServerKeypair,
   sendAndConfirm,
   simulateOnly,
@@ -110,13 +112,17 @@ function recordTx(label, sent) {
 async function main() {
   const connection = getConnection();
   const server = getServerKeypair();
+  // The NAV keeper is its own key now, and init_vault requires the param to
+  // equal platform_config.nav_keeper. Posting a mark below therefore needs
+  // that key to sign, not the server key.
+  const keeper = getNavKeeperKeypair();
   const simulateOnlyMode = process.env.E2E_SIMULATE === "1";
   const depositSol = Number(process.env.E2E_DEPOSIT_SOL ?? "0.05");
   const depositLamports = solToLamports(depositSol);
   const vaultName = process.env.E2E_VAULT_NAME ?? `e2e-${Date.now().toString(36)}`;
 
   console.log("=".repeat(74));
-  console.log("Coffer vault E2E — devnet, via the API's own on-chain client (no IDL)");
+  console.log("Coffer vault E2E — via the API's own on-chain client (no IDL)");
   console.log("=".repeat(74));
 
   // ── [0] environment ──────────────────────────────────────────────
@@ -169,10 +175,12 @@ async function main() {
       navStalenessSeconds: 3_600n,
       unlockPeriodSeconds: 3_600n,
       maxNavDeltaBps: 2_000,
-      maxTradeNotionalLamports: 18_446_744_073_709_551_615n,
+      // u64::MAX is rejected now: an "uncapped" per-trade notional cap is
+      // a field the UI can display and nothing else.
+      maxTradeNotionalLamports: 1_000_000_000_000n, // 1000 SOL
       maxPriceImpactBps: 300,
       dailyLossLimitBps: 2_000,
-      navKeeper: server.publicKey,
+      navKeeper: keeper.publicKey,
       seedLamports,
     },
   });
@@ -208,7 +216,15 @@ async function main() {
   assert(v0.bump === bump, "stored bump matches the off-chain derivation");
   assert(v0.name === vaultName, `stored name round-trips ("${v0.name}")`);
   assert(v0.trader.equals(server.publicKey), "trader == creator (server key)");
-  assert(v0.navKeeper.equals(server.publicKey), "nav_keeper == server key (we can post NAV)");
+  assert(
+    v0.navKeeper.equals(keeper.publicKey),
+    "nav_keeper == the platform's dedicated keeper key",
+  );
+  assert(
+    !v0.navKeeper.equals(server.publicKey),
+    "nav_keeper is NOT the server/admin key (the split that B1 required)",
+  );
+  assert(v0.creator.equals(server.publicKey), "creator recorded, and it seeds the PDA");
   assert(v0.status === "Active", "status == Active");
   assert(
     v0.seedShares === seedLamports * 1_000n,
@@ -357,11 +373,12 @@ async function main() {
   info(`nav ${v1.navLamports} -> ${newNav} (+${newNav - v1.navLamports} lamports)`);
   const navIx = buildPostNavIx({
     vault: vaultAddress,
-    keeper: server.publicKey,
+    keeper: keeper.publicKey,
     navLamports: newNav,
     markSlot,
   });
-  const navSent = await sendAndConfirm([navIx], [], { label: "post_nav" });
+  // Keeper signs, server pays — mirroring how navKeeper.ts sends it.
+  const navSent = await sendAndConfirm([navIx], [keeper], { label: "post_nav" });
   recordTx("post_nav", navSent);
   printLogs(navSent.logs.filter((l) => l.includes("Program log:")), "post_nav program logs");
 
@@ -393,7 +410,7 @@ async function main() {
 async function summarize(startBalance, endBalance, vaultAddress, depositorPda) {
   console.log(`\n${"=".repeat(74)}`);
   if (failures.length === 0) {
-    console.log(`RESULT: PASS — ${checks.length} assertions, ${txs.length} transactions on devnet.`);
+    console.log(`RESULT: PASS — ${checks.length} assertions, ${txs.length} transactions.`);
   } else {
     console.log(`RESULT: FAIL — ${failures.length} of ${checks.length + failures.length} checks failed:`);
     for (const f of failures) console.log(`  - ${f}`);
@@ -416,7 +433,7 @@ async function summarize(startBalance, endBalance, vaultAddress, depositorPda) {
   }
   const spent = startBalance - endBalance;
   console.log(
-    `\n  devnet SOL: ${sol(startBalance)} -> ${sol(endBalance)}  (spent ${sol(spent)})`,
+    `\n  spent: ${sol(startBalance)} -> ${sol(endBalance)}  (spent ${sol(spent)})`,
   );
   console.log("=".repeat(74));
   process.exitCode = failures.length === 0 ? 0 : 1;
