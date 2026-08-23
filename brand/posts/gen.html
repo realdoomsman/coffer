@@ -273,6 +273,22 @@ CARDS['16-stack'] = function (c) {
   body(c, ['If a source fails we show a stale pill.', 'We never fabricate a price.'], y + 24, 25);
 };
 
+CARDS['17-github'] = function (c) {
+  frame(c, 'OPEN SOURCE');
+  head(c, [['THE CODE IS PUBLIC.'], ['SO IS THE GAP LIST.', AMBER]], 250, 66);
+  c.font = '700 34px "IBM Plex Mono",monospace'; c.fillStyle = AMBER;
+  c.fillText('github.com/CofferFun/coffer', 74, 540);
+  const rows = [['README', 'what it is, and where it actually stands'],
+                ['SECURITY.md', 'unaudited, devnet, reported privately'],
+                ['BACKLOG.md', 'the honest gap list']];
+  let y = 620;
+  rows.forEach(function (r) {
+    c.font = '700 25px "IBM Plex Mono",monospace'; c.fillStyle = TEXT; c.fillText(r[0], 74, y);
+    c.font = '500 23px "IBM Plex Mono",monospace'; c.fillStyle = MUTED; c.fillText(r[1], 330, y);
+    y += 50;
+  });
+};
+
 // Real 1s candles, fetched live at render time.
 async function candleCard(c) {
   frame(c, '1-SECOND CANDLES');
