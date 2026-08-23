@@ -147,6 +147,15 @@ export const env = {
    * bookkeeping, not a lamport transfer. Undefined = unconfigured, which
    * /api/vested reports honestly instead of inventing a destination.
    */
+  /**
+   * Wallet that deploys pump.fun tokens, so creator rewards accrue to it.
+   * Deliberately NOT feeEscrowWallet: that holds traders' vested fees, this
+   * holds money earmarked for funding vaults. One key per purpose keeps the
+   * accounting honest and halves what a leaked key can reach.
+   */
+  get creatorRewardsWallet(): string | undefined {
+    return str("CREATOR_REWARDS_WALLET") || undefined;
+  },
   get feeEscrowWallet(): string | undefined {
     return str("FEE_ESCROW_WALLET") || undefined;
   },
