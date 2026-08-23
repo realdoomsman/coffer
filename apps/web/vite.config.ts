@@ -18,40 +18,19 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        // Separate cacheable vendor chunks: the chart and auth stacks are
-        // big and change far less often than app code
-        manualChunks: (id) => {
-          if (id.includes("node_modules")) {
-            // React ecosystem
-            if (id.includes("react") || id.includes("react-dom") || id.includes("react-router")) {
-              return "react";
-            }
-            // Charts
-            if (id.includes("lightweight-charts")) {
-              return "charts";
-            }
-            // Buffer is a polyfill the Solana code DEPENDS on, so it must
-            // not share a chunk with it — keep it separate so it is always
-            // evaluated first.
-            if (id.includes("/buffer/") || id.includes("node_modules/buffer")) {
-              return "polyfills";
-            }
-            // Solana
-            if (id.includes("@solana")) {
-              return "solana";
-            }
-            // Auth
-            if (id.includes("@privy")) {
-              return "auth";
-            }
-            // QR codes
-            if (id.includes("qrcode")) {
-              return "qrcode";
-            }
-            // Other vendor code
-            return "vendor";
-          }
-        },
+        // No manual chunking.
+        //
+        // A hand-written manualChunks splitter lived here and took the site
+        // down: it grouped node_modules by substring, which produced seven
+        // circular chunk graphs (rollup warned "vendor -> react -> solana ->
+        // vendor" and friends). Cycles make cross-chunk evaluation order
+        // undefined, so `buffer` ran before base64-js/ieee754 it depends on
+        // and died with "Cannot set properties of undefined (setting
+        // 'byteLength')" — a blank page, every route, in production only.
+        //
+        // Rollup's default chunking derives order from the real dependency
+        // graph and cannot produce these cycles. Caching gains are not worth
+        // a class of bug that only appears in a built bundle.
         // Chunk file naming with content hash for long-term caching
         chunkFileNames: "assets/js/[name]-[hash].js",
         entryFileNames: "assets/js/[name]-[hash].js",
