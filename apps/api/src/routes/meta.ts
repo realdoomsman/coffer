@@ -8,9 +8,9 @@ export const metaRouter = Router();
 
 const META_TTL_MS = 10_000;
 
-// GET /api/meta — platform-wide numbers for the header strip. The
-// expensive parts (oracle SOL price, TVL aggregate) cache 10s; apiTime
-// is always live.
+/**
+ * GET /api/meta - Platform-wide numbers for the header strip
+ */
 metaRouter.get("/", async (_req, res, next) => {
   try {
     const cached = await getOrSet("platform:meta", META_TTL_MS, async () => {

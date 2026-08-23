@@ -240,10 +240,10 @@ async function getWalletLeaderboard(params: {
   const { limit, offset, sort } = params;
 
   const orderByMap: Record<string, any> = {
-    pnl: { totalValueSol: "desc" },
-    winrate: { totalValueSol: "desc" },
-    tvl: { totalValueSol: "desc" },
-    trades: { swapCount: "desc" },
+    pnl: { pnlSol: "desc" },
+    winrate: { winRatePct: "desc" },
+    tvl: { pnlSol: "desc" },
+    trades: { trades: "desc" },
   };
 
   const orderBy = orderByMap[sort] || orderByMap.pnl;
@@ -257,7 +257,10 @@ async function getWalletLeaderboard(params: {
   const total = await prisma.trackedWallet.count();
 
   return {
-    leaders: wallets,
+    leaders: wallets.map(w => ({
+      ...w,
+      totalValueSol: w.pnlSol // Map pnlSol to expected field
+    })),
     total,
     hasMore: offset + limit < total,
   };
