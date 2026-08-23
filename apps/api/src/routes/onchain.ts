@@ -158,7 +158,34 @@ interface Guarded {
  * Refuse outright on mainnet. Returns false (after responding) so callers
  * read as `if (!guardCluster(res)) return;`.
  */
-function guardCluster(_res: import("express").Response): boolean {
+function guardCluster(res: import("express").Response): boolean {
+  // KILL SWITCH — deposits are closed while critical findings are open.
+  //
+  // The adversarial review returned CRITICAL, exploitable-as-described
+  // findings against live mainnet code that was accepting real deposits:
+  // init_vault lets a vault creator appoint their own nav_keeper, and NAV is
+  // the sole input to payout pricing, so a creator can mark the book up and
+  // withdraw the whole vault. post_nav's delta cap has no time dimension, so
+  // repeated posts in a single slot ratchet effective equity toward zero.
+  //
+  // Closing costs nothing but time. Leaving it open while those are unfixed
+  // costs whoever deposits next. Set DEPOSITS_OPEN=1 to reopen — deliberately,
+  // after the findings are fixed, not to get past this message.
+  if (process.env.DEPOSITS_OPEN !== "1") {
+    res.status(503).json({
+      error:
+        "deposits are temporarily closed: an internal security review found " +
+        "critical issues in the vault program that allow a vault creator to " +
+        "drain their own vault. Fixes are in progress. No funds are at risk " +
+        "that are not already deposited.",
+      code: "deposits_closed_pending_fix",
+    });
+    return false;
+  }
+  return true;
+}
+
+function _guardClusterOpen(_res: import("express").Response): boolean {
   // Mainnet deposits are OPEN, by the operator's explicit decision.
   //
   // This used to refuse mainnet outright because the program has not had a
