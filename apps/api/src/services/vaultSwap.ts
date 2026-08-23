@@ -5,7 +5,13 @@
 // THE WALL (trading.ts): Real vaults execute on-chain only.
 // This service is what the trading service calls when vault.mode === "real".
 
-import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
+import {
+  AddressLookupTableAccount,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { 
   buildExecuteSwapIx, 
   VAULT_PROGRAM_ID, 
@@ -14,22 +20,39 @@ import {
 } from "./program.js";
 import { getConnection, sendAndConfirm, tryGetServerKeypair } from "./signer.js";
 import { getTokenInfo } from "./prices.js";
+import { env } from "../env.js";
 
 // ── constants ────────────────────────────────────────────────────────
 
-const JUPITER_QUOTE_API = "https://quote-api.jup.ag/v6/quote";
-const JUPITER_BUILD_API = "https://quote-api.jup.ag/v6/swap";
+// Jupiter v6 (quote-api.jup.ag) is decommissioned — it does not respond at
+// all, so every swap attempt failed at the first call. The current API is
+// swap/v1 on lite-api (keyless, rate-limited) or api.jup.ag (keyed).
+//
+// We ask for INSTRUCTIONS, not a prebuilt transaction. The swap has to run
+// inside the vault program's execute_swap via CPI, and a prebuilt
+// VersionedTransaction is signed for a different fee payer and hides its
+// accounts behind address lookup tables we would have to reconstruct.
+const JUPITER_BASE = process.env.JUPITER_API_BASE ?? "https://lite-api.jup.ag/swap/v1";
+const JUPITER_QUOTE_API = `${JUPITER_BASE}/quote`;
+const JUPITER_SWAP_IX_API = `${JUPITER_BASE}/swap-instructions`;
 
 // ── types ─────────────────────────────────────────────────────────────
 
-interface JupiterQuoteResponse {
-  data: JupiterQuote[];
-}
-
+/**
+ * v1 returns the quote object directly. The old code read `data[0]` off a
+ * `{data: [...]}` envelope that no version of the API has returned for years,
+ * so it threw "No route found" on every call even when a route existed.
+ * The whole object is echoed back to /swap-instructions verbatim.
+ */
 interface JupiterQuote {
+  inputMint: string;
   inAmount: string;
+  outputMint: string;
   outAmount: string;
-  priceImpactPct: number;
+  otherAmountThreshold: string;
+  swapMode: string;
+  slippageBps: number;
+  priceImpactPct: string | number;
   routePlan: RouteStep[];
 }
 
@@ -47,10 +70,29 @@ interface RouteStep {
   percent: number;
 }
 
-interface JupiterBuildResponse {
-  swapTransaction: string;
-  lastValidBlockHeight: number;
-  prioritizationFeeLamports: number;
+/** One instruction as Jupiter serialises it. */
+interface JupiterIx {
+  programId: string;
+  accounts: { pubkey: string; isSigner: boolean; isWritable: boolean }[];
+  data: string; // base64
+}
+
+interface JupiterSwapInstructions {
+  computeBudgetInstructions?: JupiterIx[];
+  setupInstructions?: JupiterIx[];
+  swapInstruction: JupiterIx;
+  cleanupInstruction?: JupiterIx | null;
+  /**
+   * MUST be resolved and supplied when compiling a v0 message. The previous
+   * implementation deserialised a prebuilt transaction and read
+   * `staticAccountKeys`, which silently omits every account that lives in a
+   * lookup table — Jupiter routes routinely put most of their accounts there,
+   * so the resulting account list was incomplete.
+   */
+  addressLookupTableAddresses?: string[];
+  prioritizationFeeLamports?: number;
+  computeUnitLimit?: number;
+  simulationError?: unknown;
 }
 
 export interface VaultSwapParams {
@@ -86,84 +128,82 @@ async function getJupiterQuote(params: {
   url.searchParams.set("outputMint", outputMint);
   url.searchParams.set("amount", amount.toString());
   url.searchParams.set("slippageBps", slippageBps.toString());
-  url.searchParams.set("onlyDirectRoutes", "true");
+  // onlyDirectRoutes was forced on, which rejects most real routes for no
+  // stated reason. Leave routing to Jupiter and bound the risk with
+  // slippage and the price-impact check instead.
   url.searchParams.set("asLegacyTransaction", "false");
 
   const response = await fetch(url.toString(), {
-    headers: { "Accept": "application/json" },
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
   });
-
   if (!response.ok) {
     throw new Error(`Jupiter quote failed: ${response.status} ${response.statusText}`);
   }
 
-  const data: unknown = await response.json();
-  const quoteData = data as JupiterQuoteResponse;
-  
-  if (!quoteData.data || !quoteData.data[0]) {
+  const quote = (await response.json()) as JupiterQuote;
+  if (!quote?.outAmount) {
     throw new Error("No route found");
   }
 
-  const quote = quoteData.data[0];
   return {
+    // the raw object, echoed verbatim into /swap-instructions
+    raw: quote,
     inAmount: BigInt(quote.inAmount),
     outAmount: BigInt(quote.outAmount),
-    priceImpactPct: quote.priceImpactPct || 0,
-    routePlan: quote.routePlan || [],
+    // v1 sends priceImpactPct as a decimal STRING ("0.0034" = 0.34%), not a
+    // number. Number() on it is fine; the old `|| 0` on a string was not.
+    priceImpactPct: Number(quote.priceImpactPct) || 0,
+    routePlan: quote.routePlan ?? [],
   };
 }
 
-async function buildJupiterSwap(params: {
-  inputMint: string;
-  outputMint: string;
-  amount: bigint;
+/**
+ * Ask Jupiter for the swap INSTRUCTIONS for a quote.
+ *
+ * This is a POST with the quote object in the body. The previous version sent
+ * a GET with query parameters, which no version of this endpoint accepts.
+ */
+async function getJupiterSwapInstructions(params: {
+  quote: JupiterQuote;
   userPublicKey: string;
-  slippageBps?: number;
   prioritizationFeeLamports?: number;
-}) {
-  const { inputMint, outputMint, amount, userPublicKey, slippageBps = 100, prioritizationFeeLamports } = params;
+}): Promise<JupiterSwapInstructions> {
+  const { quote, userPublicKey, prioritizationFeeLamports } = params;
 
-  const url = new URL(JUPITER_BUILD_API);
-  url.searchParams.set("inputMint", inputMint);
-  url.searchParams.set("outputMint", outputMint);
-  url.searchParams.set("amount", amount.toString());
-  url.searchParams.set("userPublicKey", userPublicKey);
-  url.searchParams.set("slippageBps", slippageBps.toString());
-  url.searchParams.set("onlyDirectRoutes", "true");
-  url.searchParams.set("asLegacyTransaction", "false");
-  
-  if (prioritizationFeeLamports !== undefined) {
-    url.searchParams.set("prioritizationFeeLamports", prioritizationFeeLamports.toString());
-  }
-
-  const response = await fetch(url.toString(), {
-    headers: { "Accept": "application/json" },
+  const response = await fetch(JUPITER_SWAP_IX_API, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    signal: AbortSignal.timeout(20_000),
+    body: JSON.stringify({
+      quoteResponse: quote,
+      userPublicKey,
+      // The vault PDA cannot create its own token accounts by signing, so
+      // setup instructions must be surfaced rather than silently assumed.
+      wrapAndUnwrapSol: true,
+      ...(prioritizationFeeLamports !== undefined
+        ? { prioritizationFeeLamports }
+        : {}),
+    }),
   });
 
   if (!response.ok) {
-    throw new Error(`Jupiter build failed: ${response.status} ${response.statusText}`);
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `Jupiter swap-instructions failed: ${response.status} ${response.statusText} ${body.slice(0, 200)}`,
+    );
   }
 
-  const data: unknown = await response.json();
-  const buildData = data as JupiterBuildResponse;
-  
-  if (!buildData.swapTransaction) {
-    throw new Error("Jupiter build returned no transaction");
+  const data = (await response.json()) as JupiterSwapInstructions;
+  if (!data?.swapInstruction?.programId) {
+    throw new Error("Jupiter returned no swap instruction");
   }
-
-  return {
-    swapTransaction: buildData.swapTransaction,
-    lastValidBlockHeight: buildData.lastValidBlockHeight,
-    prioritizationFeeLamports: buildData.prioritizationFeeLamports || 0,
-  };
+  if (data.simulationError) {
+    throw new Error(`Jupiter simulation failed: ${JSON.stringify(data.simulationError).slice(0, 200)}`);
+  }
+  return data;
 }
 
-// ── Main execution function ─────────────────────────────────────────
-
-/**
- * Execute a trade through the vault program using Jupiter Router.
- * This is the on-chain counterpart to the paper trading engine.
- */
 export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSwapResult> {
   const { 
     vaultId, 
@@ -174,6 +214,18 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
     maxPriceImpactBps = 500,
     slippageBps = 100 
   } = params;
+
+  // Jupiter does not index devnet. There are no devnet routes, no devnet
+  // liquidity and no devnet pools behind this API, so a swap here cannot
+  // succeed no matter how correct the code is. Fail with the reason rather
+  // than with "No route found", which reads like a thin-liquidity problem
+  // and sends whoever hits it looking in the wrong place.
+  if (env.solanaCluster !== "mainnet-beta" && env.solanaCluster !== "mainnet") {
+    throw new Error(
+      `Real swaps require mainnet: Jupiter has no ${env.solanaCluster} coverage. ` +
+        `Vault trading stays disabled until the program is deployed to mainnet.`,
+    );
+  }
 
   console.log(`[vault-swap] Starting swap for vault ${vaultId}: ${amountIn} ${inputMint.toBase58()} -> ${outputMint.toBase58()}`);
 
@@ -193,23 +245,34 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
 
   console.log(`[vault-swap] Quote: ${quote.inAmount} -> ${quote.outAmount} (${quote.priceImpactPct}% impact)`);
 
-  // 2. Build Jupiter transaction
-  const jupiterBuild = await buildJupiterSwap({
-    inputMint: inputMint.toBase58(),
-    outputMint: outputMint.toBase58(),
-    amount: amountIn,
+  // 2. Ask Jupiter for the swap INSTRUCTIONS (not a prebuilt transaction).
+  const jupiterIxs = await getJupiterSwapInstructions({
+    quote: quote.raw,
     userPublicKey: vaultPda.toBase58(),
-    slippageBps,
   });
 
-  // 3. Decode Jupiter transaction to extract instructions
-  const jupiterTx = VersionedTransaction.deserialize(
-    Buffer.from(jupiterBuild.swapTransaction, "base64")
+  // 3. Resolve the address lookup tables the route depends on.
+  //
+  // Jupiter puts most of a route's accounts in lookup tables. The previous
+  // implementation deserialised a prebuilt transaction and used
+  // `staticAccountKeys`, which contains only the handful of accounts NOT in a
+  // table — so the account list handed to the vault program was missing most
+  // of the route and the CPI could not have succeeded.
+  const connection = getConnection();
+  const altAddresses = jupiterIxs.addressLookupTableAddresses ?? [];
+  const lookupTables: AddressLookupTableAccount[] = [];
+  for (const addr of altAddresses) {
+    const res = await connection.getAddressLookupTable(new PublicKey(addr));
+    if (!res.value) {
+      throw new Error(`Address lookup table ${addr} could not be fetched`);
+    }
+    lookupTables.push(res.value);
+  }
+
+  const jupiterInstructions = [jupiterIxs.swapInstruction];
+  const jupiterAccounts = jupiterIxs.swapInstruction.accounts.map(
+    (a) => new PublicKey(a.pubkey),
   );
-  
-  // VersionedTransaction.message has the compiled instructions and account keys
-  const jupiterInstructions = jupiterTx.message.compiledInstructions;
-  const jupiterAccounts = jupiterTx.message.staticAccountKeys;
   
   // 4. Build the vault program's execute_swap instruction
   const minAmountOut = quote.outAmount * BigInt(10000 - slippageBps) / 10000n;
@@ -226,24 +289,26 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
     jupiterAccounts,
   });
 
-  // 5. Create the final transaction
-  const connection = getConnection();
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  
-  const message = new TransactionMessage({
-    payerKey: vaultPda,
-    recentBlockhash: blockhash,
-    instructions: [executeSwapIx],
-  }).compileToV0Message();
-
-  const tx = new VersionedTransaction(message);
-  
-  // 6. Sign with the server key (vault operator)
+  // 5. Create the final transaction.
+  //
+  // The fee payer must be a key that can actually sign. vaultPda is a program
+  // address with no private key, so a transaction declaring it as payer is
+  // invalid no matter who signs it — the previous code set payerKey to the
+  // PDA and then signed with the server key.
   const keyResult = tryGetServerKeypair();
   if ("error" in keyResult) {
     throw new Error(`Cannot sign transaction: ${keyResult.error}`);
   }
-  
+
+  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+
+  const message = new TransactionMessage({
+    payerKey: keyResult.keypair.publicKey,
+    recentBlockhash: blockhash,
+    instructions: [executeSwapIx],
+  }).compileToV0Message(lookupTables);
+
+  const tx = new VersionedTransaction(message);
   tx.sign([keyResult.keypair]);
 
   // 7. Send and confirm
