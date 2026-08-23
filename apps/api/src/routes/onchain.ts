@@ -292,12 +292,17 @@ async function loadRealVault(
   // created by anyone else is not one this route can build a deposit for.
   const [derived] = vaultPda(getServerKeypair().publicKey, dbVault.id);
   if (derived.toBase58() !== dbVault.onchainVaultPda) {
-    // The PDA is a pure function of (creator, row id); a mismatch means the
-    // row was tampered with, or the vault was created by another key.
-    // Refuse rather than send money to a stored string.
-    res.status(500).json({
-      error: "stored vault PDA does not match the PDA derived from the vault id",
-      code: "pda_mismatch",
+    // Almost always this is a row still pointing at a vault created under the
+    // OLD PDA seeds (["vault", name] rather than ["vault", creator, name]).
+    // That is an expected, operator-fixable data state — run
+    // scripts/migrate-vaults.mjs — not a server fault, and answering 500 both
+    // pages the wrong person and tells the user nothing they can act on.
+    res.status(409).json({
+      error:
+        "this vault is still on the previous on-chain layout and is being migrated. " +
+        "Deposits into it are unavailable until that finishes.",
+      code: "legacy_vault_needs_migration",
+      expectedPda: derived.toBase58(),
       stored: dbVault.onchainVaultPda,
       derived: derived.toBase58(),
     });

@@ -15,8 +15,6 @@
 import type { Keypair } from "@solana/web3.js";
 import { PublicKey } from "@solana/web3.js";
 import {
-  type FetchedVault,
-  type FetchedVaultDepositor,
   MIN_SEED_LAMPORTS,
   buildDepositIx,
   buildInitDepositorIx,
@@ -24,9 +22,13 @@ import {
   effectiveEquity,
   explorerAddress,
   explorerTx,
+  fetchPlatformConfigAccount,
   fetchVaultAccount,
   fetchVaultDepositorAccount,
+  platformConfigPda,
   sharesForDeposit,
+  type FetchedVault,
+  type FetchedVaultDepositor,
   vaultAccountToJson,
   vaultDepositorPda,
   vaultDepositorToJson,
@@ -88,6 +90,16 @@ export async function initVaultOnChain(
   const server = getServerKeypair();
   const seedLamports = input.seedLamports ?? MIN_SEED_LAMPORTS;
 
+  const [platformConfigPdaKey] = platformConfigPda();
+  const platformConfig = await fetchPlatformConfigAccount(getConnection(), platformConfigPdaKey);
+  if (!platformConfig) {
+    throw new Error(
+      `platform config ${platformConfigPdaKey.toBase58()} does not exist — run init_platform ` +
+        "before creating vaults (scripts/onchain-smoke.mjs)",
+    );
+  }
+  const platformNavKeeper = platformConfig.navKeeper;
+
   const { ix, vault } = buildInitVaultIx({
     creator: server.publicKey,
     vault: {
@@ -101,7 +113,21 @@ export async function initVaultOnChain(
       maxTradeNotionalLamports: PLATFORM_VAULT_DEFAULTS.maxTradeNotionalLamports,
       maxPriceImpactBps: PLATFORM_VAULT_DEFAULTS.maxPriceImpactBps,
       dailyLossLimitBps: PLATFORM_VAULT_DEFAULTS.dailyLossLimitBps,
-      navKeeper: server.publicKey,
+      // Read from the chain, never from a local key.
+      //
+      // This was `server.publicKey`, and init_vault now requires
+      // `params.nav_keeper == platform_config.nav_keeper`. The keeper is a
+      // DEDICATED key, distinct from the server/admin key by design (it has
+      // to be online hourly, so it must not also be the upgrade authority), so
+      // every vault creation reverted Unauthorized — and vaults.ts deletes the
+      // row and answers 502 when that happens. No vault could be created at
+      // all, and the migration for the existing ones would have failed 26
+      // times in a row.
+      //
+      // Deliberately NOT getNavKeeperKeypair().publicKey: signer.ts falls back
+      // to the server key when NAV_KEEPER_KEYPAIR_JSON is unset, which would
+      // silently reintroduce exactly this mismatch.
+      navKeeper: platformNavKeeper,
       seedLamports,
     },
   });

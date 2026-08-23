@@ -12,11 +12,14 @@ import { requirePrivyUser } from "../services/privyAuth.js";
 import { env } from "../env.js";
 import { crystallize, unlockAt } from "../services/fees.js";
 import {
-  depositOnChain,
   initVaultOnChain,
   readOnChainVault,
 } from "../services/onchainVaults.js";
-import { MIN_DEPOSIT_LAMPORTS, solToLamports } from "../services/program.js";
+import {
+  MIN_DEPOSIT_LAMPORTS,
+  StaleVaultLayoutError,
+  solToLamports,
+} from "../services/program.js";
 import { OnChainError, getServerPublicKey, tryGetServerKeypair } from "../services/signer.js";
 import { executeTrade, REAL_VAULT_WALL, TradeError } from "../services/trading.js";
 import {
@@ -30,6 +33,15 @@ import {
 } from "../services/vaults.js";
 
 export const vaultsRouter = Router();
+
+/**
+ * Real vaults a single trader may create per day.
+ *
+ * Each one costs the platform ~0.019 SOL it never gets back, and creation was
+ * anonymous and unmetered: 26 were created in about two hours, several of them
+ * obvious junk.
+ */
+const MAX_REAL_VAULTS_PER_DAY = 3;
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -259,13 +271,40 @@ vaultsRouter.post("/", async (req, res, next) => {
     // vault ownership meaningless — and with creator-fee distribution paying
     // out per vault, it would have paid every share to one account.
     //
-    // Falls back to the demo user only when there is no Privy session, which
-    // is what keeps local demo mode working.
+    // Falls back to the demo user only for PAPER vaults, and only when there
+    // is no Privy session — which is what keeps local demo mode working.
+    //
+    // For a REAL vault the fallback is refused. Creating one spends about
+    // 0.019 SOL of platform SOL that never comes back (rent for the 1095-byte
+    // account plus the economically-burned seed deposit), and anonymous
+    // callers assigned every vault to the one shared "you" account: all 26
+    // real rows on this deployment are owned by the demo user, which makes
+    // ownership meaningless and breaks creator-fee attribution.
     let trader;
     try {
       ({ user: trader } = await requirePrivyUser(req));
     } catch {
+      if (vaultMode === "real") {
+        res.status(401).json({ error: "sign in to create a real vault", code: "auth_required" });
+        return;
+      }
       trader = await getDemoUser();
+    }
+
+    // Bound the spend independently of auth: Privy accounts are free to mint,
+    // so a session is not a budget.
+    if (vaultMode === "real") {
+      const since = new Date(Date.now() - 24 * 3600 * 1000);
+      const recent = await prisma.vault.count({
+        where: { traderId: trader.id, mode: "real", createdAt: { gte: since } },
+      });
+      if (recent >= MAX_REAL_VAULTS_PER_DAY) {
+        res.status(429).json({
+          error: `you can create ${MAX_REAL_VAULTS_PER_DAY} real vaults per day; you have created ${recent}`,
+          code: "rate_limited",
+        });
+        return;
+      }
     }
     const created = await prisma.vault.create({
       data: {
@@ -357,6 +396,39 @@ vaultsRouter.post("/", async (req, res, next) => {
 // it). 422 when the oracle has no live mark — we never fabricate.
 vaultsRouter.post("/:id/trade", async (req, res, next) => {
   try {
+    // AUTH + OWNERSHIP. This route had neither, and it dispatches into
+    // executeVaultSwap, which signs with the SERVER keypair. Anyone who could
+    // reach the URL could move a real vault's SOL through Jupiter; the only
+    // thing stopping it was that no real vault had a funded buffer yet.
+    //
+    // Only the vault's own trader may trade it. The demo-user fallback is kept
+    // for PAPER vaults so local demo mode still works, and refused for real.
+    const vaultRow = await prisma.vault.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, mode: true, traderId: true },
+    });
+    if (!vaultRow) {
+      res.status(404).json({ error: "vault not found" });
+      return;
+    }
+    let caller;
+    try {
+      ({ user: caller } = await requirePrivyUser(req));
+    } catch {
+      if (vaultRow.mode === "real") {
+        res.status(401).json({ error: "sign in to trade a real vault", code: "auth_required" });
+        return;
+      }
+      caller = await getDemoUser();
+    }
+    if (caller.id !== vaultRow.traderId) {
+      res.status(403).json({
+        error: "only this vault's trader can place its trades",
+        code: "not_the_trader",
+      });
+      return;
+    }
+
     const body = (req.body ?? {}) as {
       side?: "buy" | "sell";
       mint?: string;
@@ -637,10 +709,29 @@ vaultsRouter.get("/:id/onchain", async (req, res, next) => {
       const key = tryGetServerKeypair();
       authority = "error" in key ? undefined : key.keypair.publicKey.toBase58();
     }
-    const view = await readOnChainVault(dbVault.onchainVaultPda, authority);
+    let view;
+    try {
+      view = await readOnChainVault(dbVault.onchainVaultPda, authority);
+    } catch (e) {
+      // A vault written by the previous program layout cannot be decoded. That
+      // is a known, operator-fixable state (scripts/migrate-vaults.mjs), not a
+      // server fault, and 500ing on it took the whole vault page down with an
+      // error nobody reading it could act on.
+      if (e instanceof StaleVaultLayoutError) {
+        res.status(409).json({
+          error:
+            "this vault is still on the previous on-chain layout and is being migrated",
+          code: "legacy_vault_needs_migration",
+          vaultPda: dbVault.onchainVaultPda,
+        });
+        return;
+      }
+      throw e;
+    }
     if (!view) {
       res.status(502).json({
         error: "on-chain vault account not found",
+        code: "vault_missing_onchain",
         vaultPda: dbVault.onchainVaultPda,
       });
       return;
@@ -651,65 +742,19 @@ vaultsRouter.get("/:id/onchain", async (req, res, next) => {
   }
 });
 
-// POST /api/vaults/:id/onchain/deposit { sol } — REAL on-chain deposit.
+// POST /api/vaults/:id/onchain/deposit — DELETED.
 //
-// ⚠ DEVNET PROOF PATH: the SERVER keypair signs, so the shares are
-// credited to the platform's own key, not to a user. This is deliberate
-// and temporary — it proves init_depositor + deposit execute against the
-// deployed program. USER deposits (signed by the user's Privy embedded
-// wallet, so the VaultDepositor PDA belongs to the USER) are a separate
-// task: the instructions built here are already byte-for-byte the ones
-// the user would sign; what is missing is the signature, not the client.
-vaultsRouter.post("/:id/onchain/deposit", async (req, res, next) => {
-  try {
-    const sol = Number((req.body ?? {}).sol);
-    if (!Number.isFinite(sol) || sol <= 0) {
-      res.status(400).json({ error: "sol must be a positive number" });
-      return;
-    }
-    if (sol > 1_000) {
-      res.status(400).json({ error: "sol exceeds the on-chain deposit ceiling (1000)" });
-      return;
-    }
-    const lamports = solToLamports(sol);
-    if (lamports < MIN_DEPOSIT_LAMPORTS) {
-      res.status(400).json({ error: `deposit must be at least ${MIN_DEPOSIT_LAMPORTS} lamports` });
-      return;
-    }
-    const dbVault = await prisma.vault.findUnique({ where: { id: req.params.id } });
-    if (!dbVault) {
-      res.status(404).json({ error: "vault not found" });
-      return;
-    }
-    if (dbVault.mode !== "real") {
-      res.status(409).json({ error: "this route is on-chain only; paper vaults use /deposit" });
-      return;
-    }
-    if (!dbVault.onchainVaultPda) {
-      res.status(409).json({ error: "vault has no on-chain account (init_vault never landed)" });
-      return;
-    }
-    const key = tryGetServerKeypair();
-    if ("error" in key) {
-      res.status(503).json({ error: `server signer unavailable: ${key.error}` });
-      return;
-    }
-    const result = await depositOnChain({
-      vaultPda: dbVault.onchainVaultPda,
-      amountLamports: lamports,
-    });
-    res.status(201).json({
-      vaultId: dbVault.id,
-      vaultPda: dbVault.onchainVaultPda,
-      signedBy: getServerPublicKey().toBase58(),
-      signerRole: "server_keypair_devnet_proof",
-      ...result,
-    });
-  } catch (err) {
-    if (err instanceof OnChainError) {
-      res.status(502).json({ error: "on-chain deposit failed", ...err.toJson() });
-      return;
-    }
-    next(err);
-  }
-});
+// It signed a REAL deposit with getServerKeypair(), had no authentication of
+// any kind, bypassed the DEPOSITS_OPEN kill switch entirely, and accepted up
+// to 1000 SOL per call. Its own docblock called it a "DEVNET PROOF PATH", but
+// this deployment runs mainnet-beta, so the lamports were real, they came out
+// of the platform hot wallet, and the shares minted to the platform key rather
+// than to any user — so the SOL was not even recoverable through a withdrawal.
+//
+// It could not land only because no vault had a reachable on-chain account.
+// Migrating the vaults would have turned it into an anonymous drain of the hot
+// wallet, which is why it is gone rather than gated.
+//
+// The path that belongs on mainnet is the user-signed one:
+//   POST /api/onchain/deposit/prepare  -> unsigned tx for the USER to sign
+//   POST /api/onchain/deposit/confirm  -> verified on chain before recording
