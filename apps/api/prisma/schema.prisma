@@ -160,7 +160,9 @@ model EquityPoint {
   vaultId String
   vault   Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
   t       Int // unix seconds
-  v       Float // vault equity in SOL
+  v       Float // SHARE PRICE in SOL (not vault equity — renamed in
+  // meaning during the per-share fix; equity rises on deposits, which is
+  // not performance. The column name was left alone to avoid a migration.)
 
   @@unique([vaultId, t])
   @@index([vaultId, t])

@@ -100,15 +100,19 @@ export interface DistributionPlan {
  */
 async function windowReturn(vaultId: string, windowDays: number): Promise<number | null> {
   const since = Math.floor(Date.now() / 1000) - windowDays * 86_400;
+  // EquityPoint.v is the SHARE PRICE, not vault equity — the column comment
+  // in schema.prisma still says equity and is stale, left over from before
+  // the curve was switched to per-share. Per-share is what this needs:
+  // equity rises when someone deposits, which is not performance.
   const points = await prisma.equityPoint.findMany({
     where: { vaultId, t: { gte: since } },
     orderBy: { t: "asc" },
-    select: { t: true, sharePriceSol: true },
+    select: { t: true, v: true },
   });
   if (points.length < 2) return null;
 
-  const first = points[0]!.sharePriceSol;
-  const last = points[points.length - 1]!.sharePriceSol;
+  const first = points[0]!.v;
+  const last = points[points.length - 1]!.v;
   if (!(first > 0)) return null;
   return last / first - 1;
 }
