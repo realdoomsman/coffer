@@ -205,26 +205,29 @@ interface Guarded {
  * read as `if (!guardCluster(res)) return;`.
  */
 function guardCluster(res: import("express").Response): boolean {
-  // KILL SWITCH — deposits are closed while critical findings are open.
+  // DEPOSIT KILL SWITCH. Set DEPOSITS_OPEN=1 to allow new deposits.
   //
-  // The adversarial review returned CRITICAL, exploitable-as-described
-  // findings against live mainnet code that was accepting real deposits:
-  // init_vault lets a vault creator appoint their own nav_keeper, and NAV is
-  // the sole input to payout pricing, so a creator can mark the book up and
-  // withdraw the whole vault. post_nav's delta cap has no time dimension, so
-  // repeated posts in a single slot ratchet effective equity toward zero.
+  // It gates DEPOSITS ONLY. Withdrawals live in their own router
+  // (routes/onchainWithdraw.ts) and deliberately do not consult this: the
+  // switch exists to stop money coming IN, and applying it to exits would
+  // trap the money already in — the opposite of what it is for.
   //
-  // Closing costs nothing but time. Leaving it open while those are unfixed
-  // costs whoever deposits next. Set DEPOSITS_OPEN=1 to reopen — deliberately,
-  // after the findings are fixed, not to get past this message.
+  // History, so nobody re-opens it without knowing what it was for: it was
+  // closed when an adversarial review returned CRITICAL findings against live
+  // mainnet code that was accepting real deposits — a vault creator could
+  // appoint their own NAV keeper and mark their own book, and post_nav's delta
+  // cap had no time dimension. Those are fixed, with tests that fail when the
+  // fixes are reverted, and the program has been redeployed and its bytecode
+  // hash verified against the local build (docs/DEPLOYMENTS.md).
+  //
+  // What is still true and must stay in the UI: the program has NOT had an
+  // independent third-party audit, and the upgrade authority is a single key.
   if (process.env.DEPOSITS_OPEN !== "1") {
     res.status(503).json({
       error:
-        "deposits are temporarily closed: an internal security review found " +
-        "critical issues in the vault program that allow a vault creator to " +
-        "drain their own vault. Fixes are in progress. No funds are at risk " +
-        "that are not already deposited.",
-      code: "deposits_closed_pending_fix",
+        "deposits are temporarily closed while security fixes are verified. " +
+        "Withdrawals are unaffected and remain open.",
+      code: "deposits_closed",
     });
     return false;
   }
