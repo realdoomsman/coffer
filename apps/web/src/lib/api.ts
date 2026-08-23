@@ -256,8 +256,14 @@ export const api = {
     mirrorSizingMode?: "fixed" | "proportional";
     mirrorFixedSol?: number;
     mirrorMaxSol?: number;
-  }) => {
-    const r = await post<{ vault: Vault }>(`/vaults`, body);
+  }, tokens?: AuthTokens) => {
+    // Vault creation went through the unauthenticated post(), which sends
+    // only content-type. The server then could not identify the caller and
+    // fell back to the demo user, so EVERY vault ever created was owned by
+    // "you" no matter who made it.
+    const r = tokens?.accessToken
+      ? await authedFetch<{ vault: Vault }>(`/vaults`, tokens, { method: "POST", body })
+      : await post<{ vault: Vault }>(`/vaults`, body);
     return r.vault;
   },
   deposit: async (vaultId: string, sol: number) => {

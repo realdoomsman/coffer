@@ -9,9 +9,11 @@ import {
 } from "@coffer/shared";
 import { api } from "../lib/api";
 import { usePageTitle } from "../lib/hooks";
+import { useAuth } from "../lib/useAuth";
 
 export function CreateVault() {
   usePageTitle("Create vault");
+  const { wallet } = useAuth();
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [type, setType] = useState<"managed" | "mirror">(params.get("leader") ? "mirror" : "managed");
@@ -32,6 +34,10 @@ export function CreateVault() {
     setBusy(true);
     setError(null);
     try {
+      // Sign the request so the vault belongs to whoever created it.
+      const tokens = wallet
+        ? { accessToken: await wallet.getAccessToken(), identityToken: wallet.identityToken }
+        : undefined;
       const v = await api.createVault({
         name: name.trim(),
         type,
@@ -46,7 +52,7 @@ export function CreateVault() {
               mirrorMaxSol: parseFloat(maxSol) || 1,
             }
           : {}),
-      });
+      }, tokens);
       nav(`/vault/${v.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed");
