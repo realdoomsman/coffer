@@ -1766,3 +1766,16 @@ tr.rowtracked td {
 
 .lfoot .flink { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
 .lfoot .flink:hover { color: var(--amber); border-color: var(--amber); }
+
+/* ── $Coffer token band ─────────────────────────────────────────── */
+.tokenband { border: 1px solid var(--line); padding: 22px; margin: 28px 0 0; }
+.tokenband .tb-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.tokenband .tb-tick { font-weight: 700; font-size: 20px; color: var(--amber); }
+.tokenband .tb-sub { color: var(--muted); font-size: 13px; }
+.tokenband .tb-rows { display: flex; flex-direction: column; gap: 8px; }
+.tokenband .tb-row { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.tokenband .tb-row .k { color: var(--muted); font-size: 12px; min-width: 130px; }
+.tokenband .tb-row code,
+.tokenband .tb-row .v { font-size: 12.5px; word-break: break-all; color: var(--text); }
+.tokenband .tb-note { color: var(--muted); font-size: 12.5px; line-height: 1.6; margin: 16px 0 0; }
+@media (max-width: 600px) { .tokenband .tb-row .k { min-width: 0; } }

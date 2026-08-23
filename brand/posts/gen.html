@@ -337,6 +337,27 @@ CARDS['19-token'] = function (c) {
   c.fillText('Not a claim on vault profits. Holding it entitles you to nothing.', 74, y + 190);
 };
 
+CARDS['20-pinned'] = function (c) {
+  frame(c, 'FEES: STRUCTURALLY PINNED');
+  head(c, [['100% OF CREATOR FEES.'], ['AUTHORITY REVOKED.', AMBER]], 220, 60);
+  c.font = '500 24px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('Not a promise. On-chain state anyone can read.', 74, 380);
+
+  const rows = [['config', '5E4Ruk9YFhBQAWSrXF5wnAvk3cc6ce8dDQnoNxR4SHhn'],
+                ['shareholder', '4MERYBFWdz37zr13AyrntYtZDxdbZhdzvAxFuXiTLSpd'],
+                ['share', '10000 bps  =  100%'],
+                ['admin_revoked', 'true  -  nobody can redirect it. not even us.']];
+  let y = 470;
+  rows.forEach(function (r, i) {
+    c.font = '700 23px "IBM Plex Mono",monospace'; c.fillStyle = TEXT; c.fillText(r[0], 74, y);
+    c.font = '500 21px "IBM Plex Mono",monospace';
+    c.fillStyle = i >= 2 ? AMBER : MUTED; c.fillText(r[1], 360, y);
+    y += 52;
+  });
+  c.font = '600 23px "IBM Plex Mono",monospace'; c.fillStyle = MUTED;
+  c.fillText('Every trade on $Coffer funds vaults. By construction.', 74, y + 30);
+};
+
 // Real 1s candles, fetched live at render time.
 async function candleCard(c) {
   frame(c, '1-SECOND CANDLES');

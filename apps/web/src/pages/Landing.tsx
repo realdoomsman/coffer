@@ -160,6 +160,39 @@ export function Landing() {
           </div>
         </section>
 
+        {/* $Coffer — stated as verifiable on-chain facts, not as a pitch.
+            No price talk, and it says plainly that holding grants nothing,
+            because implying otherwise is how a memecoin becomes a security. */}
+        <section className="tokenband">
+          <div className="tb-head">
+            <span className="tb-tick">$Coffer</span>
+            <span className="tb-sub">100% of creator fees fund vaults</span>
+          </div>
+          <div className="tb-rows">
+            <div className="tb-row">
+              <span className="k">contract</span>
+              <code>2WXUVeGq53qJ7QZacDWNRhyxsomCsZeBNsfYixY1pump</code>
+            </div>
+            <div className="tb-row">
+              <span className="k">fees route to</span>
+              <code>4MERYBFWdz37zr13AyrntYtZDxdbZhdzvAxFuXiTLSpd</code>
+            </div>
+            <div className="tb-row">
+              <span className="k">fee-share config</span>
+              <code>5E4Ruk9YFhBQAWSrXF5wnAvk3cc6ce8dDQnoNxR4SHhn</code>
+            </div>
+            <div className="tb-row">
+              <span className="k">share</span>
+              <span className="v">10000 bps (100%) · admin_revoked = true</span>
+            </div>
+          </div>
+          <p className="tb-note">
+            The routing is on-chain state, not a promise — the authority to change it has
+            been revoked, so nobody can redirect those fees, including us. Holding $Coffer
+            is not a claim on vault profits and entitles you to nothing.
+          </p>
+        </section>
+
         <footer className="lfoot">
           <span>
             Coffer · trader vaults on Solana · devnet build ·{" "}
