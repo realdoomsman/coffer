@@ -62,6 +62,28 @@ pub struct WithdrawRequestOp<'info> {
     pub depositor: Box<Account<'info, VaultDepositor>>,
 }
 
+/// Clearing an EXPIRED request needs a context where the depositor account is
+/// passed directly rather than derived from the signer — WithdrawRequestOp
+/// seeds the PDA on `authority.key()`, so a third party signing there resolves
+/// a different account entirely and can never reach the abandoned one.
+#[derive(Accounts)]
+pub struct ClearExpiredRequest<'info> {
+    /// Anyone. Pays the fee, gains nothing.
+    pub cranker: Signer<'info>,
+
+    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    pub vault: Box<Account<'info, Vault>>,
+
+    /// Seeded on the depositor's OWN authority, so the account cannot be
+    /// substituted for one belonging to a different vault or user.
+    #[account(
+        mut,
+        seeds = [VAULT_DEPOSITOR_SEED, vault.key().as_ref(), depositor.authority.as_ref()],
+        bump = depositor.bump,
+    )]
+    pub depositor: Box<Account<'info, VaultDepositor>>,
+}
+
 #[derive(Accounts)]
 pub struct ExecuteWithdraw<'info> {
     /// Receives the payout lamports. Must sign: only the depositor can
@@ -251,11 +273,46 @@ pub fn handle_request_withdraw(ctx: Context<WithdrawRequestOp>, shares: u128) ->
 // ---------------------------------------------------------------------------
 
 pub fn handle_cancel_withdraw_request(ctx: Context<WithdrawRequestOp>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
     let vault = &mut ctx.accounts.vault;
     let depositor = &mut ctx.accounts.depositor;
     require!(depositor.has_pending_request(), VaultError::NoWithdrawRequest);
 
     let req = depositor.last_withdraw_request;
+
+    // Owner-only by construction: the depositor PDA is seeded on
+    // authority.key(). Expired requests are cleared by anyone through
+    // clear_expired_request below.
+    let _ = now;
+    vault.pending_withdraw_value_lamports = vault
+        .pending_withdraw_value_lamports
+        .checked_sub(req.value_at_request_lamports)
+        .ok_or(VaultError::MathOverflow)?;
+    vault.pending_withdraw_shares = vault
+        .pending_withdraw_shares
+        .checked_sub(req.shares)
+        .ok_or(VaultError::MathOverflow)?;
+    depositor.last_withdraw_request = WithdrawRequest::default();
+    Ok(())
+}
+
+/// PERMISSIONLESS: release the reservation held by an expired request.
+///
+/// Only the reservation is released. The depositor keeps every share and may
+/// request again immediately. Without this, one abandoned request froze
+/// instant withdrawals for every other depositor in the vault, forever.
+pub fn handle_clear_expired_request(ctx: Context<ClearExpiredRequest>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let vault = &mut ctx.accounts.vault;
+    let depositor = &mut ctx.accounts.depositor;
+    require!(depositor.has_pending_request(), VaultError::NoWithdrawRequest);
+
+    let req = depositor.last_withdraw_request;
+    require!(
+        now.saturating_sub(req.requested_at) >= WITHDRAW_REQUEST_EXPIRY_SECONDS,
+        VaultError::WithdrawRequestPending
+    );
+
     vault.pending_withdraw_value_lamports = vault
         .pending_withdraw_value_lamports
         .checked_sub(req.value_at_request_lamports)

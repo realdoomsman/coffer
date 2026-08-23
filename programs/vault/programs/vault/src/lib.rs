@@ -159,6 +159,12 @@ pub mod vault {
         handle_cancel_withdraw_request(ctx)
     }
 
+    /// Permissionless: clear a withdrawal request that has expired, releasing
+    /// the free-SOL reservation it holds. Shares are untouched.
+    pub fn clear_expired_request(ctx: Context<ClearExpiredRequest>) -> Result<()> {
+        instructions::withdraw::handle_clear_expired_request(ctx)
+    }
+
     /// Pay min(value_at_request, current value) after the window; crystallize
     /// profit share from proceeds.
     pub fn execute_withdraw(ctx: Context<ExecuteWithdraw>) -> Result<()> {

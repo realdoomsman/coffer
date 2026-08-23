@@ -71,7 +71,8 @@ pub fn handle_init_vault(ctx: Context<InitVault>, params: InitVaultParams) -> Re
         VaultError::InvalidParameter
     );
     require!(
-        (0..=MAX_UNLOCK_PERIOD_SECONDS).contains(&params.unlock_period_seconds),
+        (MIN_UNLOCK_PERIOD_SECONDS..=MAX_UNLOCK_PERIOD_SECONDS)
+            .contains(&params.unlock_period_seconds),
         VaultError::InvalidParameter
     );
     require!(

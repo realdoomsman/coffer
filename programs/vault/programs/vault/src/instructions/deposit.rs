@@ -43,8 +43,20 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
     require!(amount_lamports >= MIN_DEPOSIT_LAMPORTS, VaultError::DepositTooSmall);
     vault.assert_nav_fresh(now)?;
 
-    // Price BEFORE the deposit lands.
-    let equity = vault.effective_equity(now);
+    // Price BEFORE the deposit lands, at FULL nav — not the drip-suppressed
+    // equity that withdrawals use.
+    //
+    // EXPLOIT FIXED: both sides used effective_equity(), which subtracts
+    // still-locked profit. After a gain is posted the locked portion makes
+    // equity look smaller, so shares look cheap — and a depositor arriving
+    // just after a posted gain bought in below fair value and collected the
+    // drip as it unlocked. The drip exists to stop a sandwich AROUND a NAV
+    // post; pricing deposits with it handed away the same value to anyone
+    // who simply arrived after one.
+    //
+    // The asymmetry is deliberate and both halves favour existing holders:
+    // deposits pay the full price, withdrawals receive the conservative one.
+    let equity = vault.nav_lamports;
     // The vault always has seed equity, but a catastrophic 100% NAV loss could
     // zero it; refuse to mint infinite shares against nothing.
     require!(equity > 0, VaultError::ZeroEquity);

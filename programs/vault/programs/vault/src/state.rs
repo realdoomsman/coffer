@@ -85,6 +85,27 @@ pub const SECONDS_PER_DAY: i64 = 86_400;
 pub const MAX_REDEEM_WINDOW_SECONDS: i64 = 30 * SECONDS_PER_DAY;
 pub const MAX_UNLOCK_PERIOD_SECONDS: i64 = 7 * SECONDS_PER_DAY;
 
+/// Floor on the locked-profit drip.
+///
+/// The range used to start at 0, which switches the drip off: a posted gain
+/// became withdrawable in the same block, so a trader could post a gain and
+/// instant_withdraw straight through it. The drip is the only thing standing
+/// between a NAV post and a same-block exit, so it may not be disabled.
+pub const MIN_UNLOCK_PERIOD_SECONDS: i64 = 60 * 60; // 1 hour
+
+/// After this, an unexecuted withdrawal request may be cleared by ANYONE.
+///
+/// A request reserves its value out of the vault's free SOL so a matured
+/// withdrawal can never be stranded. Cancelling required the requester's own
+/// signature, so a depositor who requested and walked away left that
+/// reservation in place forever — freezing instant withdrawals for every
+/// other depositor, permanently, with no one able to undo it.
+///
+/// Expiry makes the reservation self-healing. Clearing an expired request
+/// only releases the reservation; the depositor keeps every share and can
+/// request again at any time.
+pub const WITHDRAW_REQUEST_EXPIRY_SECONDS: i64 = 14 * SECONDS_PER_DAY;
+
 /// Bounds on the configurable NAV staleness window used to gate
 /// deposits/withdrawals.
 pub const MIN_NAV_STALENESS_SECONDS: i64 = 60;
