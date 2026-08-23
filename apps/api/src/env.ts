@@ -150,6 +150,14 @@ export const env = {
   get feeEscrowWallet(): string | undefined {
     return str("FEE_ESCROW_WALLET") || undefined;
   },
+  /**
+   * Helius key. Used for the mainnet RPC pool and, more importantly, for
+   * getPriorityFeeEstimate — mainnet transactions sent with no priority fee
+   * do not land during congestion.
+   */
+  get heliusApiKey(): string | undefined {
+    return str("HELIUS_API_KEY") || undefined;
+  },
   /** Public mainnet RPC for read-only wallet scans (keyless works, rate-limited). */
   get mainnetRpcUrl(): string {
     return str("MAINNET_RPC_URL", "https://api.mainnet-beta.solana.com");

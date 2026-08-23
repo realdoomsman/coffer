@@ -21,6 +21,7 @@ import {
 import { getConnection, sendAndConfirm, tryGetServerKeypair } from "./signer.js";
 import { getTokenInfo } from "./prices.js";
 import { env } from "../env.js";
+import { computeBudgetIxs } from "./priorityFee.js";
 
 // ── constants ────────────────────────────────────────────────────────
 
@@ -302,10 +303,19 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
 
   const { blockhash } = await connection.getLatestBlockhash("confirmed");
 
+  // Price the priority fee against the accounts this route actually touches.
+  // Jupiter reports the compute its route needs; the default 200k limit is
+  // not enough for a multi-hop swap and the transaction would fail on CU
+  // exhaustion rather than on anything to do with the trade.
+  const budgetIxs = await computeBudgetIxs({
+    accountKeys: jupiterAccounts.map((k) => k.toBase58()),
+    computeUnitLimit: jupiterIxs.computeUnitLimit ?? 400_000,
+  });
+
   const message = new TransactionMessage({
     payerKey: keyResult.keypair.publicKey,
     recentBlockhash: blockhash,
-    instructions: [executeSwapIx],
+    instructions: [...budgetIxs, executeSwapIx],
   }).compileToV0Message(lookupTables);
 
   const tx = new VersionedTransaction(message);
