@@ -127,6 +127,27 @@ Measured, not guessed — keep these in product copy:
 - **The header mark can disagree with the chart** (chart ~2s old, mark up to ~8s).
   Invisible at 5m, visible at 1s.
 
+## Launch blockers — verified 2026-08-23, do not launch for real money until cleared
+
+1. **Real trading points at a decommissioned Jupiter endpoint.**
+   `apps/api/src/services/vaultSwap.ts` uses `quote-api.jup.ag/v6/quote`,
+   which returns nothing at all (curl exit 000). `lite-api.jup.ag/swap/v1/quote`
+   and `api.jup.ag/swap/v1/quote` both return 200. The swap path is wired end
+   to end but cannot execute a single trade until the base URL and the request
+   shape are moved to the v1 API.
+2. **The program does not enforce the terms we advertise.** `state.rs:50` still
+   has `PLATFORM_PROFIT_BPS: u16 = 1_000` — a 10% platform cut, no vesting.
+   The site, README and the entire X launch thread say 70/30 with no platform
+   cut and a third of the trader fee escrowed 60 days. Those terms are live on
+   the paper ledger only. Until the program is upgraded and redeployed we are
+   publicly advertising economics the on-chain code contradicts. This is the
+   highest-priority item on this list.
+3. **Devnet only.** No mainnet deploy, and Jupiter has no devnet coverage, so
+   real execution cannot be proven on the cluster we run on.
+4. **No professional audit.** The gate on mainnet, stated in SECURITY.md.
+5. **Withdrawals still walled** for real vaults (`routes/withdrawals.ts:27`).
+6. **No legal entity, terms of service, or geo-fencing** before real depositors.
+
 ## Known bugs / debt
 
 - **Node 18 in the Railway build, silently.** `nixpacks.toml` says the version
