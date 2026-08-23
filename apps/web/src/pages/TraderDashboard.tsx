@@ -139,7 +139,7 @@ export function TraderDashboard() {
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "real sol" : "paper"}</span>
+            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "on-chain · devnet" : "paper"}</span>
             <TypePill type={vault.type} />
             <StatusPill status={vault.status} />
             <span className="dimtx mono" style={{ fontSize: 12 }}>

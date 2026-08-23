@@ -76,7 +76,7 @@ export function CreateVault() {
             <label>Money</label>
             <div className="chipsrow">
               <button type="button" className={`chip ${mode === "real" ? "on" : ""}`} onClick={() => setMode("real")}>
-                real SOL — the main platform
+                on-chain SOL — devnet
               </button>
               <button type="button" className={`chip ${mode === "paper" ? "on" : ""}`} onClick={() => setMode("paper")}>
                 paper — sandbox
@@ -84,7 +84,7 @@ export function CreateVault() {
             </div>
             <div className="hint">
               {mode === "real"
-                ? "Publishes now; funding and trading activate at on-chain launch. Never simulated."
+                ? "A real program-owned vault on Solana DEVNET. Devnet SOL, not mainnet SOL — the program is not deployed to mainnet yet, so this cannot hold real value. Never simulated, but not real money either."
                 : "Trades instantly at live prices — ledger entries, clearly labeled, kept out of real records."}
             </div>
           </div>

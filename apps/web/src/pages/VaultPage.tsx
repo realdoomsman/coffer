@@ -69,7 +69,7 @@ export function VaultPage() {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <h1>{vault.name}</h1>
-            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "real sol" : "paper"}</span>
+            <span className={`pill ${vault.mode}`}>{vault.mode === "real" ? "on-chain · devnet" : "paper"}</span>
             <TypePill type={vault.type} />
             <StatusPill status={vault.status} />
           </div>

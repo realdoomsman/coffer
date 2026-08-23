@@ -168,7 +168,7 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
     <div className="sectiontitle" style={{ marginTop: 0 }}>
       Deposit{" "}
       <span className="pill real" style={{ marginLeft: 6 }}>
-        real SOL
+        on-chain · devnet
       </span>
       {config && (
         <span className="pill" style={{ marginLeft: 6 }}>
