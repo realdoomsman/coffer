@@ -129,6 +129,22 @@ Measured, not guessed — keep these in product copy:
 
 ## Known bugs / debt
 
+- **Node 18 in the Railway build, silently.** `nixpacks.toml` says the version
+  comes from `engines.node` (24.x), but package.json has **no `engines` field**,
+  so Nixpacks used its default and the build ran on v18.20.5. Several packages
+  already warn EBADENGINE wanting >=20. Warnings only today. Fix by adding
+  `engines.node` or setting NIXPACKS_NODE_VERSION — on its own, so a failure is
+  attributable.
+- **`railway up --ci` prints "Deploy complete" for deployments Railway records
+  as FAILED**, and `railway logs --build` defaults to the most recent
+  *successful* deployment. Together those hid eight consecutive failed deploys.
+  Always confirm with `railway deployment list`, and pass the deployment id to
+  `railway logs` when investigating a failure.
+- **Never hand-write `manualChunks`.** A substring-based splitter produced seven
+  circular chunk graphs and took the site down (see commit cce5106); cycles make
+  cross-chunk evaluation order undefined. Rollup's default chunking cannot
+  produce them.
+
 - **`apps/api` has 68 type errors** and `npm run build -w apps/api` is `tsc`,
   so the API half of the build is red. Pre-existing, from the "production
   fixes / monitoring" sessions. 39 are in live files (productionFixes 12,
