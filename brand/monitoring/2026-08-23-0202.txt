@@ -1,0 +1,119 @@
+COFFER TWITTER POSTING REPORT
+=============================
+
+Date: 2026-08-23 02:02:21 ET
+Agent: Twitter Manager (Profile: twitter)
+Cron Run: Hourly (Hour 2 - Educational Thread slot)
+
+STATUS: BLOCKED - API Authentication Failure
+--------------------------------------------
+
+Problem:
+- X API v2 returns HTTP 401 Unauthorized on all requests
+- OAuth 1.0a authentication failing consistently
+- Root cause: Access Token has Read-only permissions, needs Read and Write
+
+Current API Credentials:
+- Consumer Key: 0sScUluYPIjkWGtynoDYKbUaX
+- Consumer Secret: ieMlWXd13wN5kOVt7ivOj5cJI0GNK670ee5u81SWcfI8gRpkcm
+- Access Token: 2091126048918310912-0hD0sNqs7QJTtsESZ54vTrUtOz4ZTE
+- Access Token Secret: RQPginS7BryYdDcmTwFUxQlEfyQIGSsk1mif43A3Ydjh1
+- Account: CofferDotFun
+
+Token File Status:
+- Path: C:\Users\Dooms\AppData\Local\hermes\profiles\twitter\secrets\x-api-keys.json
+- Last Modified: 2026-08-22 10:53:49 ET
+- Issue: Tokens NOT regenerated after permission issue diagnosed (2026-08-22 20:35 ET)
+
+Required Action:
+1. Go to https://developer.twitter.com/en/portal/dashboard
+2. Select the Coffer app
+3. Navigate to Keys and Tokens → User authentication settings → Set up
+4. Change App permissions to "Read and Write" (NOT Read-only)
+5. Save and click "Regenerate" next to Access Token and Access Token Secret
+6. Update x-api-keys.json with the new access_token and access_token_secret values
+
+Intended Post (Hour 2 - Educational Thread):
+--------------------------------------------
+Topic: How Vault Custody Works
+Type: 7-tweet thread
+
+Tweet 1:
+"How trader vault custody actually works.
+
+Most copy trading gives traders control over funds. This is the problem.
+
+On Coffer, traders cannot withdraw. Ever.
+
+Here's the architecture:"
+
+Tweet 2:
+"When you deposit into a vault, your funds go to a program-owned PDA.
+
+The trader's authority allows them to:
+- Execute trades via Jupiter
+- Withdraw their 30% share of profits
+
+They CANNOT:
+- Withdraw principal
+- Move funds to their wallet
+- Transfer to non-vault addresses"
+
+Tweet 3:
+"This is enforced at the program level, not by a contract.
+
+The PDA is derived from the vault seed.
+The trader is a signer on the vault account.
+Only the program can move funds out."
+
+Tweet 4:
+"What about profit distribution?
+
+When the trader realizes a gain:
+- 70% stays in the vault (depositor equity)
+- 30% is transferred to the trader (vested)
+
+Both transfers happen in the same transaction."
+
+Tweet 5:
+"The 60-day vesting prevents rug pulls.
+
+If the trader makes $10,000 on day 1:
+- $3,000 is allocated to them
+- They can only withdraw ~$50/day for 60 days
+
+If they blow up the vault in week 2, the unvested portion stays with depositors."
+
+Tweet 6:
+"Compare this to standard copy trading:
+
+Standard:
+- Traders have full custody of your funds
+- They can exit with your capital anytime
+- No mechanism to prevent exit scams
+
+Coffer:
+- Traders never have custody
+- Funds are locked in program-owned PDA
+- Vesting prevents premature profit extraction"
+
+Tweet 7:
+"This is the core value proposition:
+
+Back the best traders. They can never run.
+
+#Solana #DeFi #TraderVaults"
+
+Post Validation:
+- No emojis: ✓
+- No hype language: ✓
+- Technical focus: ✓
+- Minimal hashtags: ✓
+- Source: MANUAL-POST-QUEUE.md (verified content)
+- Fact-checked against codebase: ✓
+
+Next Steps:
+- After API tokens are regenerated with Read and Write permissions, this post can be delivered automatically by the cron job
+- Manual posting is currently blocked by API authentication failure
+
+Report Generated: 2026-08-23 02:05:57 ET
