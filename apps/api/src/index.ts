@@ -33,6 +33,7 @@ import { withdrawalsRouter } from "./routes/withdrawals.js";
 import { leaderboardsRouter } from "./routes/leaderboards.js";
 import { xOAuthRouter } from "./routes/xOAuth.js";
 import { monitoringRouter } from "./routes/monitoring.js";
+import { productionFixesRouter } from "./routes/productionFixes.js";
 import { startMirrorEngine, stopMirrorEngine } from "./services/mirrorEngine.js";
 import { startNavKeeper, stopNavKeeper } from "./services/navKeeper.js";
 import { startOrderEngine, stopOrderEngine } from "./services/orderEngine.js";
@@ -63,6 +64,7 @@ app.use("/api/vested", vestedRouter);
 app.use("/api/meta", metaRouter);
 app.use("/api/onchain", onchainRouter);
 app.use("/api/leaderboards", leaderboardsRouter);
+app.use("/api/fixes", productionFixesRouter);
 app.use("/api/auth", xOAuthRouter);
 
 // ── production: this process also serves the built web app ─────────
