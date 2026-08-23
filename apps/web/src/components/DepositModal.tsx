@@ -1,19 +1,30 @@
 /**
- * Deposit modal — the Incinarator pattern: address + QR + copy, with the
- * safety banner up front. Real deposits arrive with Privy + the program
- * deploy; until then this shows the account's wallet address honestly.
+ * Account wallet modal: receive (address + QR) and send.
+ *
+ * The send half exists because the receive half used to be the whole thing —
+ * SOL could arrive and then had exactly two destinations, a vault or
+ * nowhere. See SendSolPanel: it is the user's own key signing a plain
+ * transfer, no server involvement.
  */
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { shortAddr } from "@coffer/shared";
 import { useAuth } from "../lib/auth";
 import { useToast } from "../lib/toast";
+import { SendSolPanel } from "./SendSolPanel";
 
-export function DepositModal({ onClose }: { onClose: () => void }) {
+export function DepositModal({
+  onClose,
+  initialTab = "receive",
+}: {
+  onClose: () => void;
+  initialTab?: "receive" | "send";
+}) {
   const { user, demo } = useAuth();
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<"receive" | "send">(initialTab);
   const addr = user?.wallet ?? "";
 
   useEffect(() => {
@@ -25,13 +36,13 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   useEffect(() => {
-    if (!canvasRef.current || !addr) return;
+    if (tab !== "receive" || !canvasRef.current || !addr) return;
     void QRCode.toCanvas(canvasRef.current, addr, {
       width: 208,
       margin: 1,
       color: { dark: "#0a0a08", light: "#e9e6da" },
     });
-  }, [addr]);
+  }, [addr, tab]);
 
   async function copy() {
     await navigator.clipboard.writeText(addr);
@@ -49,7 +60,7 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
         style={{ maxWidth: 380 }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Deposit SOL"
+        aria-label="Account wallet"
       >
         <div
           className="mono"
@@ -62,7 +73,7 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
           }}
         >
           <span style={{ color: "var(--amber)", fontWeight: 700, letterSpacing: "0.1em" }}>
-            // DEPOSIT SOL
+            // {tab === "receive" ? "RECEIVE SOL" : "SEND SOL"}
           </span>
           <button
             onClick={onClose}
@@ -73,8 +84,37 @@ export function DepositModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
+        {addr && (
+          <div className="tabs" style={{ display: "flex", borderBottom: "1px solid var(--line-2)" }}>
+            {(["receive", "send"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className="mono"
+                style={{
+                  flex: 1,
+                  padding: "9px 0",
+                  background: "none",
+                  border: "none",
+                  borderBottom:
+                    tab === t ? "2px solid var(--amber)" : "2px solid transparent",
+                  color: tab === t ? "var(--fg)" : "var(--muted)",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14, alignItems: "center" }}>
-          {addr ? (
+          {addr && tab === "send" ? (
+            <SendSolPanel />
+          ) : addr ? (
             <>
               <canvas
                 ref={canvasRef}
