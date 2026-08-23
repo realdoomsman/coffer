@@ -107,4 +107,34 @@ pub enum VaultError {
     // -- depositor lifecycle ------------------------------------------------
     #[msg("Depositor account still holds shares")]
     DepositorNotEmpty,
+
+    // -- NAV rate limiting (B1) ---------------------------------------------
+    #[msg("Daily NAV movement cap exceeded")]
+    DailyNavMoveExceeded,
+    #[msg("Posted NAV is below the vault's own unencumbered lamport balance")]
+    NavBelowLamports,
+    #[msg("Deposits are paused after a large NAV move")]
+    DepositCooldown,
+
+    // -- swap rate limiting / cost basis (B2) -------------------------------
+    #[msg("Vault already holds the maximum number of distinct positions")]
+    TooManyPositions,
+    #[msg("Vault has no recorded cost basis for this mint")]
+    UnknownPosition,
+    #[msg("Daily swap spend cap exceeded")]
+    DailySwapSpendExceeded,
+    #[msg("Sale recovers too little against the recorded cost basis")]
+    SellBelowBasisFloor,
+
+    // -- share supply (B9) ---------------------------------------------------
+    #[msg("Total share supply cap exceeded")]
+    ShareCapExceeded,
+
+    // -- deposit hold (B5) ---------------------------------------------------
+    #[msg("Instant withdrawal is not available this soon after a deposit")]
+    DepositHoldNotElapsed,
+
+    // -- platform governance (B1) --------------------------------------------
+    #[msg("No admin transfer is pending")]
+    NoPendingAdmin,
 }

@@ -51,7 +51,7 @@ use crate::state::*;
 pub struct WithdrawRequestOp<'info> {
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(
@@ -71,7 +71,7 @@ pub struct ClearExpiredRequest<'info> {
     /// Anyone. Pays the fee, gains nothing.
     pub cranker: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     /// Seeded on the depositor's OWN authority, so the account cannot be
@@ -80,6 +80,7 @@ pub struct ClearExpiredRequest<'info> {
         mut,
         seeds = [VAULT_DEPOSITOR_SEED, vault.key().as_ref(), depositor.authority.as_ref()],
         bump = depositor.bump,
+        has_one = vault @ VaultError::Unauthorized,
     )]
     pub depositor: Box<Account<'info, VaultDepositor>>,
 }
@@ -91,7 +92,7 @@ pub struct ExecuteWithdraw<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(
@@ -138,10 +139,24 @@ pub(crate) fn pay_from_vault<'info>(
     Ok(())
 }
 
+/// Drop a request's hold on the vault's free SOL. Every path that ends a
+/// request goes through here so the two counters can never drift.
+fn release_reservation(vault: &mut Vault, req: &WithdrawRequest) -> Result<()> {
+    vault.pending_withdraw_value_lamports = vault
+        .pending_withdraw_value_lamports
+        .checked_sub(req.value_at_request_lamports)
+        .ok_or(VaultError::MathOverflow)?;
+    vault.pending_withdraw_shares = vault
+        .pending_withdraw_shares
+        .checked_sub(req.shares)
+        .ok_or(VaultError::MathOverflow)?;
+    Ok(())
+}
+
 /// Crystallize fees for `shares_w` being withdrawn at gross value `gross`,
 /// and apply all share/NAV bookkeeping. Returns (payout, trader_fee,
 /// platform_fee). Lamports are NOT moved here.
-fn settle_withdrawal(
+pub fn settle_withdrawal(
     vault: &mut Vault,
     depositor: &mut VaultDepositor,
     shares_w: u128,
@@ -150,15 +165,34 @@ fn settle_withdrawal(
 ) -> Result<(u64, u64, u64)> {
     require!(shares_w > 0, VaultError::InsufficientShares);
     require!(shares_w <= depositor.shares, VaultError::InsufficientShares);
+    // B11: refuse a burn that pays nothing.
+    //
+    // `instant_withdraw` was missing the `gross > 0` guard its two siblings
+    // both had, and `value_for_shares` floors: at the genesis price of 1000
+    // shares per lamport, any burn under ~1000 shares values at zero. The
+    // shares were destroyed, total_shares decremented and the pro-rata cost
+    // basis deducted, for nothing, in a SUCCESSFUL transaction emitting a
+    // WithdrawExecuted with payout_lamports: 0. After a heavy loss the
+    // window widens a long way. The guard lives here now so no future
+    // withdrawal path can be added without it.
+    require!(gross > 0, VaultError::InvalidParameter);
 
     // Pro-rata cost basis of the withdrawn shares.
     // ROUNDING: floor -> basis low -> profit high -> fee never undercharged.
     let basis = math::proportional_floor(depositor.net_deposits_lamports, shares_w, depositor.shares)?;
     let profit = gross.saturating_sub(basis);
 
-    // Trader pays no perf fee on their own co-invest (it would be a wash that
-    // only leaked the platform cut of their own money... platform cut still
-    // applies below, uniformly).
+    // The trader pays no performance fee on their own co-invest.
+    //
+    // NOTE, because the comment that used to sit here justified this by "it
+    // would be a wash that only leaked the platform cut of their own money -
+    // platform cut still applies below, uniformly", and the platform cut is
+    // now zero, in this same function. That rationale is void. The exemption
+    // is kept as a deliberate product decision (a trader should not pay
+    // themselves a fee out of their own principal), and it is why the trader
+    // is the only participant who realizes profit at 100% of gross - which is
+    // exactly what made the B5 sandwich free for them, and why
+    // MIN_DEPOSIT_HOLD_SECONDS now applies to everyone including the trader.
     let trader_fee = if is_trader {
         0
     } else {
@@ -273,7 +307,6 @@ pub fn handle_request_withdraw(ctx: Context<WithdrawRequestOp>, shares: u128) ->
 // ---------------------------------------------------------------------------
 
 pub fn handle_cancel_withdraw_request(ctx: Context<WithdrawRequestOp>) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
     let vault = &mut ctx.accounts.vault;
     let depositor = &mut ctx.accounts.depositor;
     require!(depositor.has_pending_request(), VaultError::NoWithdrawRequest);
@@ -283,15 +316,7 @@ pub fn handle_cancel_withdraw_request(ctx: Context<WithdrawRequestOp>) -> Result
     // Owner-only by construction: the depositor PDA is seeded on
     // authority.key(). Expired requests are cleared by anyone through
     // clear_expired_request below.
-    let _ = now;
-    vault.pending_withdraw_value_lamports = vault
-        .pending_withdraw_value_lamports
-        .checked_sub(req.value_at_request_lamports)
-        .ok_or(VaultError::MathOverflow)?;
-    vault.pending_withdraw_shares = vault
-        .pending_withdraw_shares
-        .checked_sub(req.shares)
-        .ok_or(VaultError::MathOverflow)?;
+    release_reservation(vault, &req)?;
     depositor.last_withdraw_request = WithdrawRequest::default();
     Ok(())
 }
@@ -308,19 +333,18 @@ pub fn handle_clear_expired_request(ctx: Context<ClearExpiredRequest>) -> Result
     require!(depositor.has_pending_request(), VaultError::NoWithdrawRequest);
 
     let req = depositor.last_withdraw_request;
-    require!(
-        now.saturating_sub(req.requested_at) >= WITHDRAW_REQUEST_EXPIRY_SECONDS,
-        VaultError::WithdrawRequestPending
-    );
+    // B3b: the grace runs from the END of the vault's redeem window, not from
+    // the request. A flat 14-day expiry against a window that may be 30 days
+    // let anyone delete a request that was not yet executable - clear at day
+    // 14, depositor re-requests, cleared again at day 14, and
+    // execute_withdraw was unreachable on that vault forever.
+    let expires_at = req
+        .requested_at
+        .saturating_add(vault.redeem_window_seconds)
+        .saturating_add(WITHDRAW_REQUEST_GRACE_SECONDS);
+    require!(now >= expires_at, VaultError::WithdrawRequestPending);
 
-    vault.pending_withdraw_value_lamports = vault
-        .pending_withdraw_value_lamports
-        .checked_sub(req.value_at_request_lamports)
-        .ok_or(VaultError::MathOverflow)?;
-    vault.pending_withdraw_shares = vault
-        .pending_withdraw_shares
-        .checked_sub(req.shares)
-        .ok_or(VaultError::MathOverflow)?;
+    release_reservation(vault, &req)?;
     depositor.last_withdraw_request = WithdrawRequest::default();
     Ok(())
 }
@@ -337,20 +361,44 @@ pub fn handle_execute_withdraw(ctx: Context<ExecuteWithdraw>) -> Result<()> {
 
     require!(depositor.has_pending_request(), VaultError::NoWithdrawRequest);
     let req = depositor.last_withdraw_request;
+    let waited = now.saturating_sub(req.requested_at);
     require!(
-        now.saturating_sub(req.requested_at) >= vault.redeem_window_seconds,
+        waited >= vault.redeem_window_seconds,
         VaultError::RedeemWindowNotElapsed
     );
     vault.assert_nav_fresh(now)?;
+    // B4: a short wait is an instant withdrawal by another name, so it is
+    // held to the instant path's tighter staleness bound. MIN_REDEEM_WINDOW
+    // makes this unreachable for vaults created under this build; it stays
+    // because `redeem_window_seconds` is per-vault immutable state and older
+    // vaults carry whatever they were created with, including zero.
+    if waited < INSTANT_WITHDRAW_MAX_NAV_STALENESS_SECONDS {
+        require!(
+            now.saturating_sub(vault.nav_posted_at)
+                <= INSTANT_WITHDRAW_MAX_NAV_STALENESS_SECONDS,
+            VaultError::NavTooStaleForInstant
+        );
+    }
 
-    // "Worse-of" rule: the depositor gets the LESSER of the value their shares
-    // had when they asked and the value those shares have now. WHY: requesting
-    // can never lock in a price the vault subsequently lost, and waiting can
-    // never earn more than was locked — removing every timing edge a
-    // withdrawing depositor could hold over remaining depositors.
+    // Priced at EXECUTION, capped at the request-time value only when the
+    // vault has genuinely gained since.
+    //
+    // B7: the cap used to be an unconditional min(), and the drip only ever
+    // moves equity UP between posts, so min() systematically selected the
+    // stale request-time number. A depositor who requested and then watched a
+    // legal +10% mark land during their window was paid the pre-mark price
+    // and forfeited the gain to whoever stayed. The doc claimed worse-of
+    // "removes every timing edge a withdrawing depositor could hold"; it did
+    // not remove the edge, it inverted it - the requester held a strictly
+    // negative option and the stayers held a free one, and nothing in the
+    // emitted event said so.
+    //
+    // The edge worse-of exists to close is a depositor locking in a price the
+    // vault subsequently LOST. That is the `current < request` case, and it
+    // is still capped. The `current > request` case is not a timing edge -
+    // the shares really are worth more - so it is paid.
     let equity = vault.effective_equity(now);
-    let current_value = math::value_for_shares(req.shares, vault.total_shares, equity)?;
-    let gross = req.value_at_request_lamports.min(current_value);
+    let gross = math::value_for_shares(req.shares, vault.total_shares, equity)?;
 
     let is_trader = depositor.authority == vault.trader;
     let (payout, trader_fee, platform_fee) =
@@ -358,14 +406,7 @@ pub fn handle_execute_withdraw(ctx: Context<ExecuteWithdraw>) -> Result<()> {
 
     // Release this request's reservation before the buffer check so the check
     // sees reservations for OTHER requests only.
-    vault.pending_withdraw_value_lamports = vault
-        .pending_withdraw_value_lamports
-        .checked_sub(req.value_at_request_lamports)
-        .ok_or(VaultError::MathOverflow)?;
-    vault.pending_withdraw_shares = vault
-        .pending_withdraw_shares
-        .checked_sub(req.shares)
-        .ok_or(VaultError::MathOverflow)?;
+    release_reservation(vault, &req)?;
     depositor.last_withdraw_request = WithdrawRequest::default();
 
     // SOL buffer check: rent floor + other requests + platform fees owed
@@ -378,7 +419,7 @@ pub fn handle_execute_withdraw(ctx: Context<ExecuteWithdraw>) -> Result<()> {
         .checked_add(trader_fee)
         .ok_or(VaultError::MathOverflow)?;
     require!(
-        vault.free_sol(vault_ai.lamports(), rent_min) >= outflow,
+        vault.free_sol(vault_ai.lamports(), rent_min, now) >= outflow,
         VaultError::InsufficientSolBuffer
     );
 
@@ -414,6 +455,20 @@ pub fn handle_instant_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) -> R
     require!(!depositor.has_pending_request(), VaultError::WithdrawRequestPending);
     require!(shares > 0 && shares <= depositor.shares, VaultError::InsufficientShares);
 
+    // B5: a deposit cannot be instantly withdrawn.
+    //
+    // The drip stops a same-block sandwich around a NAV post. It does not
+    // stop the same play stretched over the drip: deposit, wait for the
+    // locked profit to unlock to ALL shares including the ones just minted,
+    // exit with a slice of a gain somebody else's capital earned. The trader
+    // ran it for free, since is_trader waives the performance fee. Anyone
+    // genuinely investing is unaffected by an hour; anyone arriving to skim
+    // one unlock is not.
+    require!(
+        now.saturating_sub(depositor.last_deposit_ts) >= MIN_DEPOSIT_HOLD_SECONDS,
+        VaultError::DepositHoldNotElapsed
+    );
+
     // Skipping the redeem window demands a tighter staleness bound: the mark
     // must be at most INSTANT_WITHDRAW_MAX_NAV_STALENESS_SECONDS old AND
     // inside the vault's own window (whichever is stricter).
@@ -439,7 +494,7 @@ pub fn handle_instant_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) -> R
         .checked_add(trader_fee)
         .ok_or(VaultError::MathOverflow)?;
     require!(
-        vault.free_sol(vault_ai.lamports(), rent_min) >= outflow,
+        vault.free_sol(vault_ai.lamports(), rent_min, now) >= outflow,
         VaultError::InsufficientSolBuffer
     );
 
@@ -491,21 +546,40 @@ pub fn handle_emergency_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) ->
     let vault = &mut ctx.accounts.vault;
     let depositor = &mut ctx.accounts.depositor;
 
-    // Same spend-once guard as instant_withdraw: a pending request has already
-    // reserved these shares' value on the vault, so burning them here too
-    // would double-spend. Nobody is trapped behind this — cancel is never NAV
-    // gated, so a depositor with a stranded request cancels and comes back.
-    require!(!depositor.has_pending_request(), VaultError::WithdrawRequestPending);
-    require!(shares > 0 && shares <= depositor.shares, VaultError::InsufficientShares);
-
-    // The ONLY gate on this path, and the exact mirror image of
-    // assert_nav_fresh: this exists BECAUSE the mark is abandoned, so it must
-    // never be reachable while the normally priced (unhaircut) paths are.
+    // B10: the hatch opens on EITHER of two conditions.
+    //
+    // It used to test only keeper liveness, which is a predicate about the
+    // keeper and not about whether this depositor can actually get out. A
+    // keeper posting every six hours refreshes nav_posted_at forever, so the
+    // hatch never opened - while a vault configured with a 60-second
+    // staleness window left withdrawals possible for 60 seconds out of every
+    // 21,600, at instants only the keeper knew in advance. `lib.rs` promised
+    // this path made entitlement unconditional; it was conditional on the
+    // keeper's cadence and on every other depositor's behaviour.
     let nav_age = now.saturating_sub(vault.nav_posted_at);
+    let keeper_abandoned = nav_age >= NAV_EMERGENCY_GRACE_SECONDS;
+    // ... or this depositor's own request matured and still cannot be settled.
+    let exit_blocked = depositor.has_pending_request() && {
+        let req = depositor.last_withdraw_request;
+        now.saturating_sub(req.requested_at)
+            >= vault
+                .redeem_window_seconds
+                .saturating_add(WITHDRAW_REQUEST_GRACE_SECONDS)
+    };
     require!(
-        nav_age >= NAV_EMERGENCY_GRACE_SECONDS,
+        keeper_abandoned || exit_blocked,
         VaultError::NavNotStaleEnough
     );
+
+    // Release this depositor's own reservation if they hold one, so the
+    // shares are not counted twice. It is their request; nobody else's state
+    // is touched.
+    if depositor.has_pending_request() {
+        let req = depositor.last_withdraw_request;
+        release_reservation(vault, &req)?;
+        depositor.last_withdraw_request = WithdrawRequest::default();
+    }
+    require!(shares > 0 && shares <= depositor.shares, VaultError::InsufficientShares);
 
     // Priced on the last posted mark — by construction there is no fresh one.
     // Same pricing function as every other path; NAV_EMERGENCY_GRACE_SECONDS
@@ -529,16 +603,19 @@ pub fn handle_emergency_withdraw(ctx: Context<ExecuteWithdraw>, shares: u128) ->
     let (payout, trader_fee, platform_fee) =
         settle_withdrawal(vault, depositor, shares, gross, is_trader)?;
 
-    // Same buffer discipline as every other payout: never the rent floor,
-    // never another depositor's reservation, never platform fees owed. If the
-    // buffer is short because the float is wrapped, sol_ops::settle_unwrap is
-    // the permissionless way to force it back (review finding H2).
+    // Rent floor and the treasury's fees are still respected. Other
+    // depositors' RESERVATIONS deliberately are not (B10): this hatch exists
+    // precisely for the case where nobody else is acting, and running the
+    // same reservation check as every other path meant a third party's stale
+    // request held the escape hatch shut too - the exact failure the hatch
+    // was written to make impossible. If the buffer is short because the
+    // float is wrapped, sol_ops::settle_unwrap forces it back permissionlessly.
     let rent_min = Rent::get()?.minimum_balance(vault_ai.data_len());
     let outflow = payout
         .checked_add(trader_fee)
         .ok_or(VaultError::MathOverflow)?;
     require!(
-        vault.free_sol(vault_ai.lamports(), rent_min) >= outflow,
+        vault.free_sol_unreserved(vault_ai.lamports(), rent_min) >= outflow,
         VaultError::InsufficientSolBuffer
     );
 

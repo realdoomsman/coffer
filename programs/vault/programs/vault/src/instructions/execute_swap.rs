@@ -49,7 +49,11 @@ pub struct ExecuteSwap<'info> {
     /// Trader or appointed operator; validated in the handler.
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(
+        mut,
+        seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()],
+        bump = vault.bump
+    )]
     pub vault: Box<Account<'info, Vault>>,
 
     /// Global kill switch lives here.
@@ -192,8 +196,14 @@ pub fn handle_execute_swap<'c: 'info, 'info>(
     infos.extend(ctx.remaining_accounts.iter().cloned());
 
     let vault_name = ctx.accounts.vault.name;
+    let vault_creator = ctx.accounts.vault.creator;
     let vault_bump = ctx.accounts.vault.bump;
-    let signer_seeds: &[&[u8]] = &[VAULT_SEED, vault_name.as_ref(), &[vault_bump]];
+    let signer_seeds: &[&[u8]] = &[
+        VAULT_SEED,
+        vault_creator.as_ref(),
+        vault_name.as_ref(),
+        &[vault_bump],
+    ];
     invoke_signed(&ix, &infos, &[signer_seeds])?;
 
     // ---- verify actual balance deltas (never trust instruction data) ------
@@ -216,44 +226,121 @@ pub fn handle_execute_swap<'c: 'info, 'info>(
         .ok_or(VaultError::SlippageExceeded)?;
     require!(out_delta >= min_out, VaultError::SlippageExceeded);
 
-    // MITIGATION — min_out is supplied by the same party that supplies the
-    // route, so on its own it bounds nothing: a trader can pass min_out = 1
-    // and route the vault's SOL into a pool they own.
+    // ---- B2: bound BOTH legs, and bound them cumulatively -----------------
     //
-    // A complete fix needs a price oracle to know what the output is WORTH,
-    // which this program does not have. What it can do without one is bound
-    // the rate: when the vault is spending wSOL, refuse to spend more than
-    // MAX_SWAP_EQUITY_BPS of equity in a single trade. That does not make a
-    // bad trade impossible; it makes draining the vault take many trades,
-    // each one a separate on-chain record, instead of one.
+    // min_out is supplied by the same party that supplies the route, so on
+    // its own it bounds nothing: a trader can pass min_out = 1 and route the
+    // vault's SOL into a pool they own. What the program HAS, without an
+    // oracle, is what the vault paid: every buy below records
+    // `wsol_basis_lamports` against the mint, written by the trader's own
+    // earlier trade at whatever the market gave them then. That is the one
+    // price in here the trade authority cannot author, and it is what the
+    // sell leg is measured against.
     //
-    // This is a rate limit standing in for a price check. It should be
-    // replaced by an oracle bound, and this comment should not outlive it.
-    if ctx.accounts.source_token.mint == WSOL_MINT {
-        let equity = ctx.accounts.vault.effective_equity(Clock::get()?.unix_timestamp);
-        let per_swap_cap = crate::math::mul_bps_floor(equity, MAX_SWAP_EQUITY_BPS);
-        require!(in_delta <= per_swap_cap, VaultError::MaxInExceeded);
+    // The previous mitigation capped only the wSOL-SPENDING direction, and
+    // only per trade. Two holes, both fatal:
+    //   (a) selling was completely uncapped - `source.mint != WSOL_MINT` and
+    //       the check was skipped entirely, so the whole book could leave in
+    //       ONE instruction for one lamport of consideration;
+    //   (b) the per-trade cap reads `effective_equity`, which reads
+    //       `nav_lamports`, which execute_swap never writes - so it was a
+    //       CONSTANT 5% of the pre-trade mark for every trade in a sequence,
+    //       and twenty transactions spent everything.
+    let equity = ctx.accounts.vault.effective_equity(now);
+    let per_swap_cap = crate::math::mul_bps_floor(equity, MAX_SWAP_EQUITY_BPS);
+    let today = now.div_euclid(SECONDS_PER_DAY);
+
+    let source_mint = ctx.accounts.source_token.mint;
+    let dest_mint = ctx.accounts.dest_token.mint;
+    let source_is_wsol = source_mint == WSOL_MINT;
+    let vault = &mut ctx.accounts.vault;
+
+    // The swap accumulator rolls on its OWN clock, not `day_bucket`. That one
+    // only advances when the keeper posts, and a trader must not be able to
+    // earn a fresh spending budget by waiting for a keeper that may never
+    // come back.
+    if vault.swap_day_bucket != today {
+        vault.swap_day_bucket = today;
+        vault.daily_swap_spend_lamports = 0;
     }
 
-    // Per-trade notional cap, measured on whichever leg is wSOL. Note that
-    // capping the receive side too means unwinding an oversized position
-    // takes multiple trades — accepted: predictable clip sizes are the point.
-    let vault = &ctx.accounts.vault;
-    let wsol_delta = if ctx.accounts.source_token.mint == WSOL_MINT {
-        in_delta
+    if source_is_wsol {
+        // ---- BUY: wSOL out, tokens in -------------------------------------
+        require!(in_delta <= per_swap_cap, VaultError::MaxInExceeded);
+
+        let daily_cap = ((equity as u128) * (MAX_DAILY_SWAP_SPEND_BPS as u128)
+            / BPS_DENOMINATOR) as u64;
+        let projected = vault
+            .daily_swap_spend_lamports
+            .checked_add(in_delta)
+            .ok_or(VaultError::MathOverflow)?;
+        require!(projected <= daily_cap, VaultError::DailySwapSpendExceeded);
+        vault.daily_swap_spend_lamports = projected;
+
+        // Record what we paid for what we got. This is the number the sell
+        // leg is held to.
+        vault.position_add(dest_mint, out_delta, in_delta)?;
     } else {
-        out_delta
-    };
+        // ---- SELL: tokens out, wSOL in ------------------------------------
+        //
+        // Give up the pro-rata basis of the tokens leaving, and refuse a clip
+        // that recovers less than MIN_SELL_RECOVERY_BPS of it. A trader whose
+        // position genuinely halved can still exit - in clips - and every
+        // clip's shortfall is charged to the day's loss budget below, so a
+        // position that really is worthless still freezes the vault on the
+        // way out instead of emptying it quietly.
+        let basis_out = vault.position_remove(&source_mint, in_delta)?;
+        let floor = crate::math::mul_bps_floor(basis_out, MIN_SELL_RECOVERY_BPS);
+        require!(out_delta >= floor, VaultError::SellBelowBasisFloor);
+
+        // Realized loss against basis is capped per trade by the same 5% of
+        // equity that bounds a buy, and feeds the daily breaker so a sequence
+        // of lossy clips trips it.
+        let realized_loss = basis_out.saturating_sub(out_delta);
+        if realized_loss > 0 {
+            require!(realized_loss <= per_swap_cap, VaultError::MaxInExceeded);
+            if vault.day_bucket == today {
+                vault.daily_loss_accumulator = vault
+                    .daily_loss_accumulator
+                    .checked_add(realized_loss)
+                    .ok_or(VaultError::MathOverflow)?;
+            } else {
+                // First activity of the day: open the bucket here rather than
+                // waiting for a keeper post, so realized losses always land
+                // somewhere.
+                vault.day_bucket = today;
+                vault.daily_loss_accumulator = realized_loss;
+                vault.daily_gain_accumulator = 0;
+                vault.day_start_equity = equity;
+            }
+        }
+
+        // Selling frees budget: the wSOL is back and can legitimately be
+        // redeployed without that counting as fresh spend.
+        vault.daily_swap_spend_lamports = vault
+            .daily_swap_spend_lamports
+            .saturating_sub(out_delta);
+    }
+
+    // Per-trade notional cap, measured on whichever leg is wSOL.
+    let wsol_delta = if source_is_wsol { in_delta } else { out_delta };
     require!(
         wsol_delta <= vault.max_trade_notional_lamports,
         VaultError::NotionalTooLarge
     );
 
+    // Trading stops the moment the breaker is breached, including by a loss
+    // realized in THIS instruction.
+    if vault.status == VaultStatus::Active && vault.daily_loss_breached(now) {
+        vault.status = VaultStatus::Frozen;
+        vault.frozen_by = FrozenBy::RiskBreaker;
+    }
+
     emit!(SwapExecuted {
         vault: vault_key,
         authority: ctx.accounts.authority.key(),
-        source_mint: ctx.accounts.source_token.mint,
-        dest_mint: ctx.accounts.dest_token.mint,
+        source_mint,
+        dest_mint,
         in_delta,
         out_delta,
     });

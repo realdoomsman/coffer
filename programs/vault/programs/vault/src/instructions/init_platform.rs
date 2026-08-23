@@ -51,11 +51,19 @@ pub struct InitPlatform<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handle_init_platform(ctx: Context<InitPlatform>) -> Result<()> {
+pub fn handle_init_platform(ctx: Context<InitPlatform>, nav_keeper: Pubkey) -> Result<()> {
+    require!(nav_keeper != Pubkey::default(), VaultError::InvalidParameter);
     let cfg = &mut ctx.accounts.platform_config;
     cfg.bump = ctx.bumps.platform_config;
     cfg.treasury_bump = ctx.bumps.treasury;
     cfg.admin = ctx.accounts.admin.key();
+    cfg.pending_admin = Pubkey::default();
+    // Seeded from the upgrade authority only because that is who signs the
+    // bootstrap. It is expected to be pointed at a dedicated hot key and the
+    // admin moved to a multisig immediately after - which is now possible,
+    // because the keeper is a separate field (B1).
+    cfg.nav_keeper = nav_keeper;
     cfg.kill_switch = false;
+    cfg.padding = [0u8; 128];
     Ok(())
 }

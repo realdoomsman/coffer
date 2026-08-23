@@ -35,13 +35,26 @@ pub struct SetNavKeeper<'info> {
     )]
     pub platform_config: Account<'info, PlatformConfig>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
+}
+
+/// Two-step admin rotation. `propose_admin` stages, `accept_admin` commits.
+#[derive(Accounts)]
+pub struct AcceptAdmin<'info> {
+    pub new_admin: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [PLATFORM_CONFIG_SEED],
+        bump = platform_config.bump,
+    )]
+    pub platform_config: Account<'info, PlatformConfig>,
 }
 
 #[derive(Accounts)]
 pub struct CollectPlatformFees<'info> {
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(seeds = [PLATFORM_CONFIG_SEED], bump = platform_config.bump)]
@@ -85,6 +98,44 @@ pub fn handle_set_kill_switch(ctx: Context<AdminPlatformOp>, on: bool) -> Result
     Ok(())
 }
 
+/// Stage an admin handover. Nothing changes until the proposed key signs
+/// `accept_admin`, so a typo cannot brick platform governance.
+///
+/// B1: `admin` used to be write-once and permanently equal to the program
+/// upgrade authority. With the keeper split off (below), the admin role can
+/// now be moved to a multisig without breaking NAV posting - which is the
+/// whole point, and was impossible before.
+pub fn handle_propose_admin(ctx: Context<AdminPlatformOp>, new_admin: Pubkey) -> Result<()> {
+    require!(new_admin != Pubkey::default(), VaultError::InvalidParameter);
+    ctx.accounts.platform_config.pending_admin = new_admin;
+    Ok(())
+}
+
+/// Commit a staged handover. Signed by the incoming key, which proves it
+/// exists and is controlled.
+pub fn handle_accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+    let cfg = &mut ctx.accounts.platform_config;
+    require!(cfg.pending_admin != Pubkey::default(), VaultError::NoPendingAdmin);
+    require!(
+        ctx.accounts.new_admin.key() == cfg.pending_admin,
+        VaultError::Unauthorized
+    );
+    cfg.admin = cfg.pending_admin;
+    cfg.pending_admin = Pubkey::default();
+    Ok(())
+}
+
+/// Point the platform at a new NAV keeper key. Existing vaults keep pointing
+/// at the old one until `set_nav_keeper` is run against each of them.
+pub fn handle_set_platform_nav_keeper(
+    ctx: Context<AdminPlatformOp>,
+    new_keeper: Pubkey,
+) -> Result<()> {
+    require!(new_keeper != Pubkey::default(), VaultError::InvalidParameter);
+    ctx.accounts.platform_config.nav_keeper = new_keeper;
+    Ok(())
+}
+
 /// NAV keeper rotation, platform-admin only.
 /// WHY admin and not trader: the keeper's marks price every share; a
 /// trader-appointed keeper could mark the trader's own book up.
@@ -93,13 +144,14 @@ pub fn handle_set_kill_switch(ctx: Context<AdminPlatformOp>, on: bool) -> Result
 /// platform restores liveness by rotating to a working keeper.
 pub fn handle_set_nav_keeper(ctx: Context<SetNavKeeper>, new_keeper: Pubkey) -> Result<()> {
     require!(new_keeper != Pubkey::default(), VaultError::InvalidParameter);
-    // FIX — the liveness argument above justifies rotating a DEAD keeper back
-    // to the platform. It does not justify pointing a live vault's pricing at
-    // an arbitrary key: admin could name any address and drain that vault
-    // through the same NAV path a creator could. Rotation is now only ever
-    // TO the admin, which is the one key already trusted to price books.
+    // The liveness argument above justifies rotating a DEAD keeper back to
+    // the platform. It does not justify pointing a live vault's pricing at an
+    // arbitrary key: admin could name any address and drain that vault
+    // through the same NAV path a creator could. Rotation is only ever to the
+    // platform's declared keeper - which is a dedicated key, NOT the admin
+    // and NOT the upgrade authority (B1).
     require!(
-        new_keeper == ctx.accounts.platform_config.admin,
+        new_keeper == ctx.accounts.platform_config.nav_keeper,
         VaultError::Unauthorized
     );
     ctx.accounts.vault.nav_keeper = new_keeper;
@@ -121,10 +173,11 @@ pub fn handle_collect_platform_fees(ctx: Context<CollectPlatformFees>) -> Result
     // pure defense-in-depth so an accounting bug could never turn into a
     // withdrawal-blocking rent violation.
     let rent_min = Rent::get()?.minimum_balance(vault_ai.data_len());
+    let now = Clock::get()?.unix_timestamp;
     let physically_available = vault_ai
         .lamports()
         .saturating_sub(rent_min)
-        .saturating_sub(vault.pending_withdraw_value_lamports);
+        .saturating_sub(vault.pending_withdraw_reserve(now));
     let amount = owed.min(physically_available);
     require!(amount > 0, VaultError::NoFeesOwed);
 

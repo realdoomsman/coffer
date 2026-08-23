@@ -17,6 +17,13 @@
 //!                                              (amount fixed by accounting,
 //!                                              destination fixed by seeds)
 //!
+//! NOTE on (2): the platform takes 0% of profit, so `platform_fees_owed` has
+//! no addend anywhere in this build and `collect_platform_fees` reverts
+//! NoFeesOwed on every possible invocation for any vault created under it.
+//! It is kept, inert, so that vaults carrying a pre-change accrual can still
+//! be swept. Treat it as dead code with a migration purpose, not as a live
+//! custody surface.
+//!
 //! Everything else is an inflow (init_vault seed, deposit) or vault-to-vault
 //! (wrap_sol, unwrap_sol, settle_unwrap, close_empty_ata, execute_swap between
 //! vault-owned token accounts). sweep_treasury moves platform revenue, not
@@ -30,9 +37,13 @@
 //! platform can restore by rotating the NAV keeper (set_nav_keeper); two
 //! permissionless paths then guarantee the promise holds even when nobody
 //! cooperates at all:
-//!   - emergency_withdraw — after NAV_EMERGENCY_GRACE_SECONDS of keeper
-//!     silence, a depositor redeems against the last posted mark less
-//!     EMERGENCY_HAIRCUT_BPS, with no keeper, admin or trader involvement.
+//!   - emergency_withdraw — opens on EITHER NAV_EMERGENCY_GRACE_SECONDS of
+//!     keeper silence OR this depositor's own request having matured and sat
+//!     unsettleable for redeem_window + WITHDRAW_REQUEST_GRACE_SECONDS. It
+//!     redeems against the last posted mark less EMERGENCY_HAIRCUT_BPS, with
+//!     no keeper, admin or trader involvement, and it is the ONE path that
+//!     ignores other depositors' reservations — otherwise a third party's
+//!     abandoned request held the escape hatch shut (B3, B10).
 //!   - settle_unwrap — once a matured request is unpayable, ANYONE may push
 //!     the vault's wSOL float back into the vault so that it can be paid.
 //!
@@ -49,12 +60,22 @@ pub mod instructions;
 pub mod math;
 pub mod state;
 
+#[cfg(test)]
+mod attack_tests;
+
 use instructions::*;
 
-// The deployed program id. Live on devnet since 2026-08-22 (slot
-// 486490805), upgrade authority 7UxfASUxKNkmTcJyiibRkxSiQ963qHg7ywrtEYumgKVk.
-// It must keep matching target/deploy/vault-keypair.json — a mismatch makes
-// every PDA derivation and CPI signature wrong at runtime, not at build time.
+// The deployed program id. It must keep matching
+// target/deploy/vault-keypair.json — a mismatch makes every PDA derivation and
+// CPI signature wrong at runtime, not at build time.
+//
+// B14: this comment used to name devnet and upgrade authority
+// 7UxfASUxKNkmTcJyiibRkxSiQ963qHg7ywrtEYumgKVk. Both were wrong — the program
+// is on MAINNET and the authority is 4MERYBFWdz37zr13AyrntYtZDxdbZhdzvAxFuXiTLSpd.
+// An operator or CI job trusting that record during an upgrade targets the
+// wrong chain with the wrong key. The deployment record lives in
+// docs/DEPLOYMENTS.md and is checked by scripts/check-program-id.mjs; do not
+// re-embed deploy facts here, because a comment cannot be verified.
 declare_id!("8315nL9tGA3TdYC6jr2jRiB1ccDepRKdXpBVmNybtW2U");
 
 #[program]
@@ -64,8 +85,31 @@ pub mod vault {
     // ---- platform bootstrap / governance ---------------------------------
 
     /// One-time platform init; gated to the program upgrade authority.
-    pub fn init_platform(ctx: Context<InitPlatform>) -> Result<()> {
-        handle_init_platform(ctx)
+    /// `nav_keeper` is the dedicated key every vault's NAV keeper is pinned
+    /// to. It is deliberately an argument and not the signer: the whole point
+    /// is that the key which posts NAV hourly is NOT the key that can rewrite
+    /// this program (B1).
+    pub fn init_platform(ctx: Context<InitPlatform>, nav_keeper: Pubkey) -> Result<()> {
+        handle_init_platform(ctx, nav_keeper)
+    }
+
+    /// Stage an admin handover (two-step; see accept_admin).
+    pub fn propose_admin(ctx: Context<AdminPlatformOp>, new_admin: Pubkey) -> Result<()> {
+        handle_propose_admin(ctx, new_admin)
+    }
+
+    /// Commit a staged handover, signed by the incoming admin.
+    pub fn accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
+        handle_accept_admin(ctx)
+    }
+
+    /// Point the platform at a new NAV keeper key (admin only). Existing
+    /// vaults follow via set_nav_keeper, one at a time.
+    pub fn set_platform_nav_keeper(
+        ctx: Context<AdminPlatformOp>,
+        new_keeper: Pubkey,
+    ) -> Result<()> {
+        handle_set_platform_nav_keeper(ctx, new_keeper)
     }
 
     /// Global trade halt. Structurally unable to block withdrawals.

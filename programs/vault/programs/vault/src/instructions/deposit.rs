@@ -17,7 +17,11 @@ pub struct Deposit<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(
+        mut,
+        seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()],
+        bump = vault.bump
+    )]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(
@@ -42,6 +46,13 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
     require!(!depositor.has_pending_request(), VaultError::WithdrawRequestPending);
     require!(amount_lamports >= MIN_DEPOSIT_LAMPORTS, VaultError::DepositTooSmall);
     vault.assert_nav_fresh(now)?;
+    // B1: no minting against a mark that just moved hard. Crushing the price
+    // is only profitable if you can buy at it; this is the hour that makes
+    // that impossible. Exits are deliberately not gated on this.
+    require!(
+        now >= vault.deposit_cooldown_until,
+        VaultError::DepositCooldown
+    );
 
     // Price BEFORE the deposit lands, at FULL nav — not the drip-suppressed
     // equity that withdrawals use.
@@ -64,6 +75,23 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
     let shares = math::shares_for_deposit(amount_lamports, vault.total_shares, equity)?;
     require!(shares > 0, VaultError::ZeroShares);
 
+    // B9: the bound math.rs asserted and nothing enforced.
+    //
+    // The mint rate is (S + 1000) / (E + 1), which grows without bound as E
+    // falls toward 1 while S stays large - so a depressed mark plus one
+    // deposit takes total_shares to ~5e20, and a couple more cycles overflow
+    // the u128 product in `value_for_shares`. Every withdrawal path calls
+    // that first, so the vault would revert MathOverflow on every exit,
+    // permanently, curable only by a program upgrade.
+    let new_total_shares = vault
+        .total_shares
+        .checked_add(shares)
+        .ok_or(VaultError::MathOverflow)?;
+    require!(
+        new_total_shares <= MAX_TOTAL_SHARES,
+        VaultError::ShareCapExceeded
+    );
+
     // Global NAV cap preserves u128 headroom for all share math (state.rs).
     let new_nav = vault
         .nav_lamports
@@ -85,10 +113,7 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount_lamports: u64) -> Result<()>
 
     // Bookkeeping. NAV grows by exactly the deposited lamports: the keeper
     // marks value changes, the program tracks flows.
-    vault.total_shares = vault
-        .total_shares
-        .checked_add(shares)
-        .ok_or(VaultError::MathOverflow)?;
+    vault.total_shares = new_total_shares;
     vault.nav_lamports = new_nav;
 
     depositor.shares = depositor

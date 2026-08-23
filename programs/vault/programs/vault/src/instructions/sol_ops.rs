@@ -26,7 +26,7 @@ pub struct WrapSol<'info> {
     /// Trader or operator.
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(seeds = [PLATFORM_CONFIG_SEED], bump = platform_config.bump)]
@@ -46,6 +46,7 @@ pub struct WrapSol<'info> {
 }
 
 pub fn handle_wrap_sol(ctx: Context<WrapSol>, amount_lamports: u64) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
     let vault_ai = ctx.accounts.vault.to_account_info();
     let vault = &ctx.accounts.vault;
 
@@ -63,7 +64,7 @@ pub fn handle_wrap_sol(ctx: Context<WrapSol>, amount_lamports: u64) -> Result<()
     // reserved for pending withdrawal requests, never platform fees owed.
     let rent_min = Rent::get()?.minimum_balance(vault_ai.data_len());
     require!(
-        vault.free_sol(vault_ai.lamports(), rent_min) >= amount_lamports,
+        vault.free_sol(vault_ai.lamports(), rent_min, now) >= amount_lamports,
         VaultError::InsufficientSolBuffer
     );
 
@@ -92,7 +93,7 @@ pub struct UnwrapSol<'info> {
     /// Trader or operator.
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(
@@ -118,8 +119,10 @@ pub fn handle_unwrap_sol(ctx: Context<UnwrapSol>) -> Result<()> {
     // destination receives rent + wrapped lamports in one move. Destination is
     // the vault PDA itself, so this is strictly vault-to-vault.
     let vault_name = vault.name;
+    let vault_creator = vault.creator;
     let vault_bump = vault.bump;
-    let signer_seeds: &[&[u8]] = &[VAULT_SEED, vault_name.as_ref(), &[vault_bump]];
+    let signer_seeds: &[&[u8]] =
+        &[VAULT_SEED, vault_creator.as_ref(), vault_name.as_ref(), &[vault_bump]];
     close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         CloseAccount {
@@ -143,7 +146,7 @@ pub struct SettleUnwrap<'info> {
     // (fixed by seeds), the amount is fixed by the token account's own
     // balance, and the handler's own preconditions decide whether it may run
     // at all — so "who called it" carries no authority here.
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     /// WITNESS, read-only: a depositor of THIS vault whose withdrawal request
@@ -202,9 +205,9 @@ pub fn handle_settle_unwrap(ctx: Context<SettleUnwrap>) -> Result<()> {
     // ---- (2) ...that the vault physically cannot pay ----------------------
     // `available` is every lamport that could legitimately be applied to a
     // withdrawal payout: the balance, less the vault's own rent-exempt floor,
-    // less fees owed to the treasury. `pending_withdraw_value_lamports` is
-    // everything the vault has already promised to pending requests (each
-    // reservation is an upper bound on its payout — see request_withdraw), so
+    // less fees owed to the treasury. `pending_withdraw_reserve` is everything
+    // the vault has already promised to pending requests, re-marked at `now`
+    // (B3 — it used to be a frozen request-time figure that never moved), so
     // `available >= reserved` means every pending request, this one included,
     // is coverable and there is nothing to settle.
     //
@@ -220,10 +223,10 @@ pub fn handle_settle_unwrap(ctx: Context<SettleUnwrap>) -> Result<()> {
         .saturating_sub(rent_min)
         .saturating_sub(vault.platform_fees_owed_lamports);
     require!(
-        available < vault.pending_withdraw_value_lamports,
+        available < vault.pending_withdraw_reserve(now),
         VaultError::SettlementNotOwed
     );
-    let shortfall = vault.pending_withdraw_value_lamports.saturating_sub(available);
+    let shortfall = vault.pending_withdraw_reserve(now).saturating_sub(available);
 
     // Captured before the close: afterwards the account holds nothing.
     let unwrapped = ctx.accounts.wsol_account.to_account_info().lamports();
@@ -236,8 +239,10 @@ pub fn handle_settle_unwrap(ctx: Context<SettleUnwrap>) -> Result<()> {
     // excess lands in the vault's own buffer, where the trader may re-wrap it
     // (wrap_sol) once the matured request has been paid.
     let vault_name = vault.name;
+    let vault_creator = vault.creator;
     let vault_bump = vault.bump;
-    let signer_seeds: &[&[u8]] = &[VAULT_SEED, vault_name.as_ref(), &[vault_bump]];
+    let signer_seeds: &[&[u8]] =
+        &[VAULT_SEED, vault_creator.as_ref(), vault_name.as_ref(), &[vault_bump]];
     close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         CloseAccount {
@@ -265,7 +270,7 @@ pub struct CloseEmptyAta<'info> {
     /// Trader or operator.
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     /// Any vault-owned token account with a ZERO balance. Its rent lamports
@@ -291,8 +296,10 @@ pub fn handle_close_empty_ata(ctx: Context<CloseEmptyAta>) -> Result<()> {
     );
 
     let vault_name = vault.name;
+    let vault_creator = vault.creator;
     let vault_bump = vault.bump;
-    let signer_seeds: &[&[u8]] = &[VAULT_SEED, vault_name.as_ref(), &[vault_bump]];
+    let signer_seeds: &[&[u8]] =
+        &[VAULT_SEED, vault_creator.as_ref(), vault_name.as_ref(), &[vault_bump]];
     close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         CloseAccount {

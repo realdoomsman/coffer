@@ -10,7 +10,7 @@ pub struct InitDepositor<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    #[account(seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(
@@ -34,7 +34,10 @@ pub fn handle_init_depositor(ctx: Context<InitDepositor>) -> Result<()> {
     d.net_deposits_lamports = 0;
     d.cumulative_profit_share_lamports = 0;
     d.last_withdraw_request = WithdrawRequest::default();
-    d.padding = [0u8; 32];
+    // Zero, not `now`: opening the record is not a deposit, and the B5 hold
+    // is measured from the deposit that funded the shares being withdrawn.
+    d.last_deposit_ts = 0;
+    d.padding = [0u8; 24];
     Ok(())
 }
 
@@ -47,7 +50,7 @@ pub struct CloseDepositor<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
-    #[account(seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(

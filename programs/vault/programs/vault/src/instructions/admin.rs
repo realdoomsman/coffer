@@ -17,7 +17,7 @@ pub struct TraderOp<'info> {
 
     #[account(
         mut,
-        seeds = [VAULT_SEED, vault.name.as_ref()],
+        seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()],
         bump = vault.bump,
         has_one = trader @ VaultError::Unauthorized,
     )]
@@ -29,7 +29,7 @@ pub struct TraderOp<'info> {
 pub struct FreezeOp<'info> {
     pub authority: Signer<'info>,
 
-    #[account(mut, seeds = [VAULT_SEED, vault.name.as_ref()], bump = vault.bump)]
+    #[account(mut, seeds = [VAULT_SEED, vault.creator.as_ref(), vault.name.as_ref()], bump = vault.bump)]
     pub vault: Box<Account<'info, Vault>>,
 
     #[account(seeds = [PLATFORM_CONFIG_SEED], bump = platform_config.bump)]
@@ -113,6 +113,16 @@ pub fn handle_unfreeze_vault(ctx: Context<FreezeOp>) -> Result<()> {
                     VaultError::BreakerCooldown
                 );
             } else {
+                // The admin may lift a breaker freeze at any time, and doing
+                // so clears the day's loss budget so the next post does not
+                // instantly re-trip on the same losses.
+                //
+                // NOTE this does NOT reset `daily_gain_accumulator` or the
+                // MAX_DAILY_NAV_MOVE_BPS ceiling, which is deliberate: that
+                // ceiling is the bound on a compromised keeper (B1) and an
+                // admin-resettable bound would be no bound at all. The
+                // breaker is a risk control; the movement cap is a safety
+                // limit, and they are not the same thing.
                 vault.daily_loss_accumulator = 0;
             }
         }
