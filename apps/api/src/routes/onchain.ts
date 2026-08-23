@@ -495,7 +495,33 @@ onchainRouter.post("/deposit/prepare", async (req, res, next) => {
       });
       return;
     }
-    const equity = effectiveEquity(onchainVault.data, nowSec);
+    // A large NAV move pauses deposits for an hour. Mirror it here so the
+    // user is told why instead of signing a transaction that reverts.
+    // Ordering matters: the program checks status -> pending request ->
+    // minimum -> nav freshness -> cooldown -> zero equity, so this sits
+    // between the staleness check above and the equity check below, and the
+    // API's error precedence matches the program's.
+    if (BigInt(nowSec) < onchainVault.data.depositCooldownUntil) {
+      const remaining = Number(onchainVault.data.depositCooldownUntil - BigInt(nowSec));
+      res.status(409).json({
+        error:
+          "this vault's mark moved more than 10% recently, so the program has paused new " +
+          `deposits for another ${Math.ceil(remaining / 60)} minutes. Withdrawals are unaffected.`,
+        code: "deposit_cooldown",
+        retryAfterSeconds: remaining,
+        cooldownUntil: Number(onchainVault.data.depositCooldownUntil),
+      });
+      return;
+    }
+
+    // Price at FULL NAV, not drip-suppressed equity.
+    //
+    // deposit.rs prices the mint at `vault.nav_lamports`; withdrawals use
+    // effective_equity. That asymmetry is deliberate and both halves favour
+    // existing holders. Quoting the withdrawal number here made
+    // `sharesExpected` too HIGH whenever any profit was still locked, so the
+    // client asserted against a figure the program would never produce.
+    const equity = onchainVault.data.navLamports;
     if (equity <= 0n) {
       res.status(409).json({
         error: "vault equity is zero on-chain — the program refuses to mint shares",

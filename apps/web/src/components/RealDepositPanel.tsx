@@ -59,6 +59,7 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
   const [configError, setConfigError] = useState<string | null>(null);
   const [me, setMe] = useState<OnChainMe | null>(null);
   const [meError, setMeError] = useState<ApiError | null>(null);
+  const [chainError, setChainError] = useState<ApiError | Error | null>(null);
   const [chain, setChain] = useState<OnChainVaultView | null>(null);
 
   const [amount, setAmount] = useState("0.05");
@@ -89,8 +90,21 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
     let alive = true;
     api
       .vaultOnchain(vault.id, address ?? undefined)
-      .then((v) => alive && setChain(v))
-      .catch(() => alive && setChain(null));
+      .then((v) => {
+        if (!alive) return;
+        setChain(v);
+        setChainError(null);
+      })
+      // The rejection used to be swallowed and `chain` set to null, which is
+      // the SAME state as "still loading" — so a vault whose on-chain account
+      // could not be read rendered the deposit form with the stale-NAV guard
+      // silently disabled and the button enabled. Failing to read the chain is
+      // exactly when a deposit form should not be offered.
+      .catch((e: unknown) => {
+        if (!alive) return;
+        setChain(null);
+        setChainError(e instanceof ApiError ? e : new Error(String(e)));
+      });
     return () => {
       alive = false;
     };
@@ -243,6 +257,30 @@ export function RealDepositPanel({ vault, onChanged }: { vault: Vault; onChanged
       </>,
     );
   }
+  if (chainError) {
+    const code = chainError instanceof ApiError ? (chainError.body?.code as string | undefined) : undefined;
+    return shell(
+      <div className="callout red">
+        {code === "legacy_vault_needs_migration" ? (
+          <>
+            This vault is still on the previous on-chain layout and is being migrated.
+            Deposits into it are unavailable until that finishes. Nothing is at risk —
+            it holds no depositor funds.
+          </>
+        ) : (
+          <>
+            Couldn't read this vault's on-chain state:{" "}
+            {chainError instanceof ApiError
+              ? String(chainError.body?.error ?? chainError.message)
+              : chainError.message}
+            . The deposit form is hidden rather than shown against numbers we cannot
+            verify.
+          </>
+        )}
+      </div>,
+    );
+  }
+
   if (meError) {
     return shell(
       <div className="callout red">

@@ -19,7 +19,6 @@ import {
   buildDepositIx,
   buildInitDepositorIx,
   buildInitVaultIx,
-  effectiveEquity,
   explorerAddress,
   explorerTx,
   fetchPlatformConfigAccount,
@@ -225,11 +224,13 @@ export async function depositOnChain(params: {
   // `sharesExpected` as a sanity bound in that case (it tracks
   // `sharesMinted` to ~1e-5), never as an authority: `sharesMinted` is
   // read back from the chain and is the truth.
-  const nowSec = BigInt(Math.floor(Date.now() / 1000));
+  // Priced at FULL NAV, matching deposit.rs. It used to use effective_equity,
+  // which is what WITHDRAWALS price against — a deliberate asymmetry that made
+  // this prediction too high whenever any profit was still locked.
   const sharesExpected = sharesForDeposit(
     params.amountLamports,
     before.data.totalShares,
-    effectiveEquity(before.data, nowSec),
+    before.data.navLamports,
   );
 
   // `payer: signer` makes the depositor the fee payer AND the only
