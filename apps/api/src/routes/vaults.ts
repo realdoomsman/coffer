@@ -8,6 +8,7 @@ import {
 } from "@coffer/shared";
 import { Router } from "express";
 import { prisma } from "../db.js";
+import { requirePrivyUser } from "../services/privyAuth.js";
 import { env } from "../env.js";
 import { crystallize, unlockAt } from "../services/fees.js";
 import {
@@ -251,7 +252,21 @@ vaultsRouter.post("/", async (req, res, next) => {
       PERF_FEE_MAX_BPS,
       Math.max(PERF_FEE_MIN_BPS, Math.round(Number(perfFeeBps) || PERF_FEE_DEFAULT_BPS)),
     );
-    const trader = await getDemoUser();
+    // Whoever is signed in owns the vault they create.
+    //
+    // This was getDemoUser() unconditionally, so every vault ever created was
+    // assigned to the same "you" account regardless of who made it. That made
+    // vault ownership meaningless — and with creator-fee distribution paying
+    // out per vault, it would have paid every share to one account.
+    //
+    // Falls back to the demo user only when there is no Privy session, which
+    // is what keeps local demo mode working.
+    let trader;
+    try {
+      ({ user: trader } = await requirePrivyUser(req));
+    } catch {
+      trader = await getDemoUser();
+    }
     const created = await prisma.vault.create({
       data: {
         name: name.trim(),

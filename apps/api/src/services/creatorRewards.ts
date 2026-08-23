@@ -29,6 +29,22 @@ import { env } from "../env.js";
 
 // ── eligibility ──────────────────────────────────────────────────────
 
+/**
+ * Eligibility mode.
+ *
+ * "open"  — every active real vault shares the pot equally, regardless of
+ *           performance or depositor count. Owner's decision: fees fund
+ *           anyone, good or bad.
+ * "merit" — the scored version below.
+ *
+ * The tradeoff is real and worth stating: under "open", one person can open
+ * N vaults and take N shares of every distribution, because nothing
+ * distinguishes a real vault from a wallet with a name. If that starts
+ * happening, MIN_INDEPENDENT_DEPOSITORS is the switch that stops it.
+ */
+export type EligibilityMode = "open" | "merit";
+export const DEFAULT_MODE: EligibilityMode = "open";
+
 /** A vault younger than this cannot have a track record worth funding. */
 const MIN_AGE_DAYS = 14;
 
@@ -193,7 +209,12 @@ export async function scoreVaults(windowDays = 30): Promise<{
  *
  * Pure: reads state, moves nothing.
  */
-export async function planDistribution(poolSol: number, windowDays = 30): Promise<DistributionPlan> {
+export async function planDistribution(
+  poolSol: number,
+  windowDays = 30,
+  mode: EligibilityMode = DEFAULT_MODE,
+): Promise<DistributionPlan> {
+  if (mode === "open") return planOpenDistribution(poolSol);
   const { scored, excluded } = await scoreVaults(windowDays);
   const distributable = Math.max(0, poolSol - RESERVE_SOL);
 
@@ -244,5 +265,51 @@ export async function planDistribution(poolSol: number, windowDays = 30): Promis
   plan.totalAllocatedSol = Number(
     plan.allocations.reduce((s, a) => s + a.amountSol, 0).toFixed(6),
   );
+  return plan;
+}
+
+/**
+ * Equal split across every active real vault, no performance test.
+ *
+ * Still refuses paper vaults. Simulated fills funded with real SOL is the
+ * one line the real/paper wall exists to hold, and no product decision
+ * about generosity changes that.
+ */
+async function planOpenDistribution(poolSol: number): Promise<DistributionPlan> {
+  const vaults = await prisma.vault.findMany({
+    where: { mode: "real", status: "active" },
+    select: { id: true, name: true, traderId: true },
+  });
+
+  const distributable = Math.max(0, poolSol - RESERVE_SOL);
+  const plan: DistributionPlan = {
+    wallet: env.creatorRewardsWallet ?? null,
+    poolSol,
+    distributableSol: distributable,
+    allocations: [],
+    excluded: [],
+    totalAllocatedSol: 0,
+    generatedAt: Date.now(),
+  };
+  if (vaults.length === 0 || distributable < MIN_DISTRIBUTION_SOL) return plan;
+
+  const each = distributable / vaults.length;
+  if (each < MIN_ALLOCATION_SOL) {
+    plan.excluded = vaults.map((v) => ({
+      vaultId: v.id,
+      vaultName: v.name,
+      reason: `split across ${vaults.length} vaults is ${each.toFixed(6)} SOL, below the ${MIN_ALLOCATION_SOL} minimum`,
+    }));
+    return plan;
+  }
+
+  plan.allocations = vaults.map((v) => ({
+    vaultId: v.id,
+    vaultName: v.name,
+    traderId: v.traderId,
+    amountSol: Number(each.toFixed(6)),
+    reason: `equal share of ${distributable.toFixed(4)} SOL across ${vaults.length} active real vaults`,
+  }));
+  plan.totalAllocatedSol = Number(plan.allocations.reduce((s, a) => s + a.amountSol, 0).toFixed(6));
   return plan;
 }
