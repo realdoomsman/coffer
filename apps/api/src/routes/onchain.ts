@@ -79,7 +79,15 @@ const DEPOSITOR_ACCOUNT_SPACE = 8 + 1 + 32 + 32 + 16 + 8 + 8 + (16 + 8 + 8) + 32
 const FEE_HEADROOM_LAMPORTS = 20_000n;
 
 /** Same ceiling the server-signed devnet route uses. */
-const MAX_DEPOSIT_SOL = 1_000;
+/**
+ * Per-deposit ceiling.
+ *
+ * Deliberately low on mainnet: the program is unaudited and now holds real
+ * money, so the cap is the only thing bounding what a single bug can cost
+ * one person. Raise with MAX_DEPOSIT_SOL once the code has a track record
+ * or an audit.
+ */
+const MAX_DEPOSIT_SOL = Number(process.env.MAX_DEPOSIT_SOL ?? (isMainnetCluster() ? 5 : 1_000));
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]+$/;
 
@@ -141,17 +149,18 @@ interface Guarded {
  * Refuse outright on mainnet. Returns false (after responding) so callers
  * read as `if (!guardCluster(res)) return;`.
  */
-function guardCluster(res: import("express").Response): boolean {
-  if (isMainnetCluster()) {
-    res.status(403).json({
-      error:
-        `user-signed deposits are disabled on cluster "${cluster()}" — the vault program ` +
-        "has not been audited, so this build only accepts real deposits on devnet",
-      code: "mainnet_refused",
-      cluster: cluster(),
-    });
-    return false;
-  }
+function guardCluster(_res: import("express").Response): boolean {
+  // Mainnet deposits are OPEN, by the operator's explicit decision.
+  //
+  // This used to refuse mainnet outright because the program has not had a
+  // professional audit. That is still true — an in-house adversarial review
+  // is not an audit, and this comment should not be read as one. What
+  // changed is who carries the decision, not the risk.
+  //
+  // The blast radius is bounded by MAX_DEPOSIT_SOL instead of by refusal.
+  // A cap is what a young protocol uses in place of a proof: it does not
+  // make a bug less likely, it makes the worst case smaller while the code
+  // earns trust. Raise it deliberately, not by default.
   return true;
 }
 
@@ -224,9 +233,11 @@ onchainRouter.get("/config", async (_req, res, next) => {
       rent = null; // RPC hiccup must not take the whole page down
     }
     res.json({
-      enabled: !isMainnetCluster() && privyConfigured(),
+      enabled: privyConfigured(),
       cluster: cluster(),
-      mainnetRefused: isMainnetCluster(),
+      // kept in the response for clients that branch on it; deposits are
+      // now open on mainnet and this is always false
+      mainnetRefused: false,
       privyConfigured: privyConfigured(),
       programId: VAULT_PROGRAM_ID.toBase58(),
       rpcUrl: publicRpcUrl(),
