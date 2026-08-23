@@ -116,6 +116,84 @@ export interface OnChainConfig {
   feeHeadroomLamports: string;
 }
 
+/** One action's availability, with the reason when it is not available. */
+export interface WithdrawActionState {
+  available: boolean;
+  blockers: string[];
+  /** emergency only */
+  haircutBps?: number;
+  estimatedPayoutLamports?: string;
+}
+
+export interface WithdrawQuote {
+  vaultId: string;
+  vaultPda: string;
+  wallet: string;
+  depositorPda: string;
+  shares: string;
+  currentValueLamports: string;
+  currentValueSol: number;
+  netDepositsLamports: string;
+  perfFeeBps: number;
+  platformFeeBps: number;
+  vault: {
+    navLamports: string;
+    equityLamports: string;
+    totalShares: string;
+    navAgeSeconds: number;
+    navStalenessSeconds: number;
+    redeemWindowSeconds: number;
+    freeSolLamports: string;
+    freeSolSol: number;
+    status: string;
+  };
+  pendingRequest: {
+    shares: string;
+    valueAtRequestLamports: string;
+    requestedAt: number;
+    windowEndsAt: number;
+    executableIn: number;
+  } | null;
+  actions: {
+    request: WithdrawActionState;
+    cancel: WithdrawActionState;
+    execute: WithdrawActionState;
+    instant: WithdrawActionState;
+    emergency: WithdrawActionState;
+  };
+}
+
+export type WithdrawAction = "request" | "cancel" | "execute" | "instant" | "emergency";
+
+export interface PreparedWithdraw {
+  transaction: string;
+  encoding: "base64";
+  action: WithdrawAction;
+  vaultId: string;
+  vaultPda: string;
+  depositorPda: string;
+  authority: string;
+  shares: string | null;
+  blockhash: string;
+  cluster: string;
+}
+
+export interface ConfirmedWithdraw {
+  ok: true;
+  signature: string;
+  vaultId: string;
+  slot: number;
+  feeLamports: number | null;
+  logs: string[];
+  position: {
+    shares: string;
+    netDepositsLamports: string;
+    cumulativeProfitShareLamports: string;
+    hasPendingRequest: boolean;
+  };
+  vault: { navLamports: string; totalShares: string } | null;
+}
+
 export interface OnChainMe {
   userId: string;
   handle: string;
@@ -430,6 +508,30 @@ export const api = {
       method: "POST",
       body: { vaultId, signature },
     }),
+  // ── real, user-signed on-chain withdrawals ──
+  // quote first: it names every reason a withdrawal would be refused, so the
+  // user learns about a gate before signing rather than from a revert.
+  withdrawQuote: (tokens: AuthTokens, vaultId: string) =>
+    authedFetch<WithdrawQuote>(
+      `/onchain/withdraw/quote?vaultId=${encodeURIComponent(vaultId)}`,
+      tokens,
+    ),
+  prepareOnchainWithdraw: (
+    tokens: AuthTokens,
+    vaultId: string,
+    action: WithdrawAction,
+    shares?: string,
+  ) =>
+    authedFetch<PreparedWithdraw>(`/onchain/withdraw/prepare`, tokens, {
+      method: "POST",
+      body: { vaultId, action, ...(shares !== undefined ? { shares } : {}) },
+    }),
+  confirmOnchainWithdraw: (tokens: AuthTokens, vaultId: string, signature: string) =>
+    authedFetch<ConfirmedWithdraw>(`/onchain/withdraw/confirm`, tokens, {
+      method: "POST",
+      body: { vaultId, signature },
+    }),
+
   onchainDeposits: (tokens: AuthTokens, vaultId?: string) =>
     authedFetch<{ deposits: ConfirmedDeposit["deposit"][] }>(
       `/onchain/deposits${vaultId ? `?vaultId=${encodeURIComponent(vaultId)}` : ""}`,

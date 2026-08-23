@@ -247,7 +247,7 @@ function _guardClusterOpen(_res: import("express").Response): boolean {
 }
 
 /** Translate a PrivyAuthError into its response; rethrow anything else. */
-function respondAuthError(res: import("express").Response, err: unknown): boolean {
+export function respondAuthError(res: import("express").Response, err: unknown): boolean {
   if (err instanceof PrivyAuthError) {
     res.status(err.status).json(err.toJson());
     return true;

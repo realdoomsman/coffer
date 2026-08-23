@@ -28,11 +28,12 @@
 
 import { createHash } from "node:crypto";
 import {
-  type AccountInfo,
-  type Connection,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
+  type AccountInfo,
+  type AccountMeta,
+  type Connection,
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { env } from "../env.js";
@@ -639,6 +640,22 @@ export function sharesForDeposit(
   return (amountLamports * (totalShares + VIRTUAL_SHARES)) / (equityLamports + VIRTUAL_LAMPORTS);
 }
 
+/**
+ * floor(shares * (E + VIRTUAL_LAMPORTS) / (S + VIRTUAL_SHARES))
+ *
+ * The exact inverse of sharesForDeposit, and math.rs's `value_for_shares`.
+ * Used to QUOTE what a withdrawal is worth before anyone signs one; the
+ * authoritative number is always what the program computes at execution.
+ */
+export function valueForShares(
+  shares: bigint,
+  totalShares: bigint,
+  equityLamports: bigint,
+): bigint {
+  if (shares <= 0n) return 0n;
+  return (shares * (equityLamports + VIRTUAL_LAMPORTS)) / (totalShares + VIRTUAL_SHARES);
+}
+
 /** ceil(locked * (period - elapsed) / period) — the Meteora drip. */
 export function lockedProfitRemaining(
   lockedProfit: bigint,
@@ -856,6 +873,218 @@ export function buildDepositIx(params: {
       ixDiscriminator("deposit"),
       new BorshWriter().u64(params.amountLamports).toBuffer(),
     ]),
+  });
+  return { ix, depositor };
+}
+
+/* ---------------------------------------------------------------------------
+ * WITHDRAWALS
+ *
+ * None of these existed. The API could build a deposit and nothing else, so a
+ * depositor's only exit was a raw RPC client and a hand-encoded instruction.
+ * A vault you can pay into and not out of is not a vault, and no amount of
+ * program-level correctness fixes that from the client side.
+ *
+ * All five are USER-SIGNED, exactly like deposit: the server builds unsigned
+ * bytes whose `authority` is the depositor's own wallet, and only that wallet
+ * can make them do anything.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * WithdrawRequestOp — shared by request_withdraw and cancel_withdraw_request.
+ *   0 authority      signer
+ *   1 vault          mut
+ *   2 depositor      mut   PDA ["vault_depositor", vault, authority]
+ */
+function withdrawRequestOpKeys(
+  authority: PublicKey,
+  vault: PublicKey,
+  depositor: PublicKey,
+): AccountMeta[] {
+  return [
+    { pubkey: authority, isSigner: true, isWritable: false },
+    { pubkey: vault, isSigner: false, isWritable: true },
+    { pubkey: depositor, isSigner: false, isWritable: true },
+  ];
+}
+
+/**
+ * ExecuteWithdraw — shared by execute_withdraw, instant_withdraw and
+ * emergency_withdraw.
+ *   0 authority      signer, mut   receives the payout
+ *   1 vault          mut
+ *   2 depositor      mut
+ *   3 trader         mut           pinned by `address = vault.trader`;
+ *                                  receives the crystallized performance fee
+ */
+function executeWithdrawKeys(
+  authority: PublicKey,
+  vault: PublicKey,
+  depositor: PublicKey,
+  trader: PublicKey,
+): AccountMeta[] {
+  return [
+    { pubkey: authority, isSigner: true, isWritable: true },
+    { pubkey: vault, isSigner: false, isWritable: true },
+    { pubkey: depositor, isSigner: false, isWritable: true },
+    { pubkey: trader, isSigner: false, isWritable: true },
+  ];
+}
+
+/**
+ * request_withdraw — start the redeem window and reserve the value.
+ * Args: shares u128
+ *
+ * The reservation is re-marked at check time now, so it falls with NAV
+ * instead of freezing at the request-time figure. Cancel is never NAV-gated,
+ * so a depositor is never stuck behind their own request.
+ */
+export function buildRequestWithdrawIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  shares: bigint;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  if (params.shares <= 0n) throw new Error("request_withdraw: shares must be > 0");
+  const [depositor] = vaultDepositorPda(params.vault, params.authority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: withdrawRequestOpKeys(params.authority, params.vault, depositor),
+    data: Buffer.concat([
+      ixDiscriminator("request_withdraw"),
+      new BorshWriter().u128(params.shares).toBuffer(),
+    ]),
+  });
+  return { ix, depositor };
+}
+
+/** cancel_withdraw_request — release the reservation, keep the shares. No args. */
+export function buildCancelWithdrawRequestIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  const [depositor] = vaultDepositorPda(params.vault, params.authority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: withdrawRequestOpKeys(params.authority, params.vault, depositor),
+    data: ixDiscriminator("cancel_withdraw_request"),
+  });
+  return { ix, depositor };
+}
+
+/**
+ * execute_withdraw — settle a matured request. No args (the request carries
+ * the share count).
+ *
+ * Priced at EXECUTION, capped at the request-time value only when the vault
+ * has genuinely gained since.
+ */
+export function buildExecuteWithdrawIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  trader: PublicKey;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  const [depositor] = vaultDepositorPda(params.vault, params.authority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: executeWithdrawKeys(params.authority, params.vault, depositor, params.trader),
+    data: ixDiscriminator("execute_withdraw"),
+  });
+  return { ix, depositor };
+}
+
+/**
+ * instant_withdraw — skip the redeem window when free SOL covers it.
+ * Args: shares u128
+ *
+ * Two extra gates the caller should be told about BEFORE they sign: the mark
+ * must be under INSTANT_WITHDRAW_MAX_NAV_STALENESS_SECONDS old, and the
+ * depositor must be MIN_DEPOSIT_HOLD_SECONDS past their last deposit.
+ */
+export function buildInstantWithdrawIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  trader: PublicKey;
+  shares: bigint;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  if (params.shares <= 0n) throw new Error("instant_withdraw: shares must be > 0");
+  const [depositor] = vaultDepositorPda(params.vault, params.authority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: executeWithdrawKeys(params.authority, params.vault, depositor, params.trader),
+    data: Buffer.concat([
+      ixDiscriminator("instant_withdraw"),
+      new BorshWriter().u128(params.shares).toBuffer(),
+    ]),
+  });
+  return { ix, depositor };
+}
+
+/**
+ * emergency_withdraw — the permissionless escape hatch.
+ * Args: shares u128
+ *
+ * Opens when the keeper has been silent for NAV_EMERGENCY_GRACE_SECONDS, OR
+ * when the caller's own request matured and still cannot be settled. Prices
+ * off the last posted mark less EMERGENCY_HAIRCUT_BPS, and ignores other
+ * depositors' reservations — a third party must not be able to hold the hatch
+ * shut. Needs no keeper, no admin and no trader cooperation.
+ */
+export function buildEmergencyWithdrawIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  trader: PublicKey;
+  shares: bigint;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  if (params.shares <= 0n) throw new Error("emergency_withdraw: shares must be > 0");
+  const [depositor] = vaultDepositorPda(params.vault, params.authority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: executeWithdrawKeys(params.authority, params.vault, depositor, params.trader),
+    data: Buffer.concat([
+      ixDiscriminator("emergency_withdraw"),
+      new BorshWriter().u128(params.shares).toBuffer(),
+    ]),
+  });
+  return { ix, depositor };
+}
+
+/**
+ * clear_expired_request — PERMISSIONLESS. Release the free-SOL reservation an
+ * abandoned request is holding. Shares are untouched; the depositor may
+ * request again immediately.
+ *   0 cranker        signer   anyone; pays the fee, gains nothing
+ *   1 vault          mut
+ *   2 depositor      mut      seeded on the DEPOSITOR's authority, not the
+ *                             signer's — a third party signing a context
+ *                             seeded on themselves could never reach the
+ *                             abandoned account.
+ */
+export function buildClearExpiredRequestIx(params: {
+  cranker: PublicKey;
+  vault: PublicKey;
+  depositorAuthority: PublicKey;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; depositor: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  const [depositor] = vaultDepositorPda(params.vault, params.depositorAuthority, programId);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: params.cranker, isSigner: true, isWritable: false },
+      { pubkey: params.vault, isSigner: false, isWritable: true },
+      { pubkey: depositor, isSigner: false, isWritable: true },
+    ],
+    data: ixDiscriminator("clear_expired_request"),
   });
   return { ix, depositor };
 }

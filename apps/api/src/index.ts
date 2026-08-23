@@ -18,6 +18,7 @@ import { marksRouter } from "./routes/marks.js";
 import { metaRouter } from "./routes/meta.js";
 import { ohlcvRouter } from "./routes/ohlcv.js";
 import { onchainRouter } from "./routes/onchain.js";
+import { onchainWithdrawRouter } from "./routes/onchainWithdraw.js";
 import { ordersRouter } from "./routes/orders.js";
 import { poolTradesRouter } from "./routes/pooltrades.js";
 import { portfolioRouter } from "./routes/portfolio.js";
@@ -61,6 +62,11 @@ app.use("/api/pooltrades", poolTradesRouter);
 app.use("/api/withdrawals", withdrawalsRouter);
 app.use("/api/vested", vestedRouter);
 app.use("/api/meta", metaRouter);
+// Withdrawals are their own router so nothing in the deposit router's
+// kill-switch path can ever be applied to an exit by accident.
+app.use("/api/onchain/withdraw", onchainWithdrawRouter);
+// Mounted AFTER the withdraw router: /api/onchain would otherwise match
+// first and only fall through by accident.
 app.use("/api/onchain", onchainRouter);
 app.use("/api/leaderboards", leaderboardsRouter);
 app.use("/api/auth", xOAuthRouter);

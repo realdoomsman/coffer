@@ -2,15 +2,20 @@ import { useState } from "react";
 import { fmtSol, splitPerfFeeBps, VEST_LOCK_DAYS, type Vault } from "@coffer/shared";
 import { api } from "../lib/api";
 import { RealDepositPanel } from "./RealDepositPanel";
+import { RealWithdrawPanel } from "./RealWithdrawPanel";
 
 /**
  * Deposit / withdraw panel.
  *
  * Two completely separate worlds, and the split is deliberate:
- *   · mode "real"  → RealDepositPanel. A vault-program deposit signed by
+ *   · mode "real"  → RealDepositPanel / RealWithdrawPanel, both signed by
  *                    the user's own Privy wallet. Nothing below this line
  *                    runs for it — the demo ledger never sees real money
  *                    (the API 409s those routes for real vaults anyway).
+ *                    The withdraw half is not optional: for a while this
+ *                    branch rendered the deposit panel alone, which meant
+ *                    real SOL could go in and nothing in the product could
+ *                    take it out.
  *   · mode "paper" → the ledger sandbox that follows.
  */
 export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: () => void }) {
@@ -61,7 +66,29 @@ export function DepositPanel({ vault, onChanged }: { vault: Vault; onChanged: ()
   }
 
   if (vault.mode === "real") {
-    return <RealDepositPanel vault={vault} onChanged={onChanged} />;
+    return (
+      <div className="panel panel-pad">
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            className={`buy ${tab === "deposit" ? "on" : ""}`}
+            onClick={() => setTab("deposit")}
+          >
+            Deposit
+          </button>
+          <button
+            className={`sell ${tab === "withdraw" ? "on" : ""}`}
+            onClick={() => setTab("withdraw")}
+          >
+            Withdraw
+          </button>
+        </div>
+        {tab === "deposit" ? (
+          <RealDepositPanel vault={vault} onChanged={onChanged} />
+        ) : (
+          <RealWithdrawPanel vault={vault} onChanged={onChanged} />
+        )}
+      </div>
+    );
   }
 
   return (
