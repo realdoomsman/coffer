@@ -419,8 +419,44 @@ export function decodePlatformConfig(data: Buffer): PlatformConfigAccount {
   };
 }
 
+/**
+ * An account written by an older build of the program.
+ *
+ * The Vault layout grew (647 -> 1095 bytes) and vault PDAs are seeded on
+ * [creator, name] now instead of the name alone, so accounts created by the
+ * previous build are unreachable and undecodable. Reading one used to throw a
+ * bare `RangeError: offset out of range`, which says nothing about what is
+ * actually wrong; callers that should SKIP a stale account could not tell it
+ * apart from a real decode bug.
+ */
+export class StaleVaultLayoutError extends Error {
+  readonly actualBytes: number;
+  readonly expectedBytes: number;
+  constructor(actual: number, expected: number) {
+    super(
+      `vault account is ${actual} bytes, this build expects ${expected} — ` +
+        "it was written by an older program layout and cannot be decoded",
+    );
+    this.name = "StaleVaultLayoutError";
+    this.actualBytes = actual;
+    this.expectedBytes = expected;
+  }
+}
+
+/**
+ * 8-byte discriminator + Vault::INIT_SPACE.
+ *
+ * Printed by the program's own `print_account_sizes` test. Keep them together:
+ * `getProgramAccounts` filters match on dataSize, so a layout change that
+ * misses this orphans every indexer built on it.
+ */
+export const VAULT_ACCOUNT_BYTES = 1095;
+
 export function decodeVault(data: Buffer): VaultAccount {
   assertDiscriminator(data, "Vault");
+  if (data.length !== VAULT_ACCOUNT_BYTES) {
+    throw new StaleVaultLayoutError(data.length, VAULT_ACCOUNT_BYTES);
+  }
   const r = new BorshReader(data);
   r.skip(8);
   const bump = r.u8();

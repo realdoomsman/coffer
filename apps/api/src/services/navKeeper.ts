@@ -39,12 +39,14 @@ import { PublicKey } from "@solana/web3.js";
 import { prisma } from "../db.js";
 import {
   MAX_NAV_LAMPORTS,
-  type VaultAccount,
+  StaleVaultLayoutError,
+  VAULT_ACCOUNT_BYTES,
   buildPostNavIx,
   effectiveEquity,
   explorerTx,
   fetchVaultAccount,
   lamportsToSol,
+  type VaultAccount,
 } from "./program.js";
 import {
   OnChainError,
@@ -92,15 +94,6 @@ const REFRESH_LEAD_SECONDS = REFRESH_LEAD_TICKS * BigInt(NAV_TICK_MS / 1000);
  */
 const FIRST_TICK_DELAY_MS = 5_000;
 
-/**
- * `8 + Vault::INIT_SPACE` (state.rs) — the Vault account's data length,
- * needed for the rent-exempt minimum that the program's own `free_sol`
- * subtracts. Verified against the live devnet accounts, which are exactly
- * 647 bytes. If this ever drifts, the equity cross-check below reports a
- * constant non-zero drift on every vault — that is the symptom.
- */
-const VAULT_ACCOUNT_BYTES = 647;
-
 /** Base signature fee, used only for the pre-flight affordability check. */
 const SIGNATURE_FEE_LAMPORTS = 5_000n;
 
@@ -117,6 +110,15 @@ let firstTickTimer: NodeJS.Timeout | null = null;
 let tickRunning = false;
 
 /** Rent-exempt minimum for a Vault account — same for every vault, fetched once. */
+/**
+ * Vaults whose on-chain account predates the current program layout.
+ *
+ * They cannot be decoded, cannot be posted to, and will never become valid
+ * again — the PDA seeds changed. Remembering them means one warning instead
+ * of one per vault per tick.
+ */
+const warnedStaleLayout = new Set<string>();
+
 let rentExemptMinimum: bigint | null = null;
 
 /** Lifetime fee accounting, so "where did the devnet SOL go" is answerable. */
@@ -318,6 +320,7 @@ async function navTick(): Promise<void> {
     let skipped = 0;
 
     for (const row of rows) {
+      if (warnedStaleLayout.has(row.id)) continue;
       // Each vault is isolated — one failure never kills the tick.
       try {
         const pda = new PublicKey(row.onchainVaultPda as string);
@@ -451,7 +454,18 @@ async function navTick(): Promise<void> {
           );
         }
       } catch (err) {
-        if (err instanceof OnChainError) {
+        if (err instanceof StaleVaultLayoutError) {
+          // Written by an older program layout: unreachable, unpriceable and
+          // never coming back. Warn once per vault per process rather than
+          // every tick, forever.
+          if (!warnedStaleLayout.has(row.id)) {
+            warnedStaleLayout.add(row.id);
+            console.warn(
+              `[nav] ${row.id}: skipping permanently — ${err.message}. ` +
+                "Clear onchainVaultPda on this row to stop it being polled.",
+            );
+          }
+        } else if (err instanceof OnChainError) {
           // NEVER let a bare Custom(6022) be the whole story: the Anchor
           // error name and the program's own log lines are the diagnosis.
           console.error(
