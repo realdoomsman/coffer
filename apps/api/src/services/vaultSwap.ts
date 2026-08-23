@@ -12,13 +12,17 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { 
-  buildExecuteSwapIx, 
-  VAULT_PROGRAM_ID, 
+import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import {
+  buildExecuteSwapIx,
+  buildWrapSolIx,
+  fetchVaultAccount,
+  vaultTokenAccount,
+  VAULT_PROGRAM_ID,
   WSOL_MINT,
-  JUPITER_ROUTER_V6 
+  JUPITER_ROUTER_V6,
 } from "./program.js";
-import { getConnection, sendAndConfirm, tryGetServerKeypair } from "./signer.js";
+import { getConnection, tryGetServerKeypair } from "./signer.js";
 import { getTokenInfo } from "./prices.js";
 import { env } from "../env.js";
 import { computeBudgetIxs } from "./priorityFee.js";
@@ -270,68 +274,141 @@ export async function executeVaultSwap(params: VaultSwapParams): Promise<VaultSw
     lookupTables.push(res.value);
   }
 
-  const jupiterInstructions = [jupiterIxs.swapInstruction];
-  const jupiterAccounts = jupiterIxs.swapInstruction.accounts.map(
-    (a) => new PublicKey(a.pubkey),
-  );
-  
-  // 4. Build the vault program's execute_swap instruction
-  const minAmountOut = quote.outAmount * BigInt(10000 - slippageBps) / 10000n;
-  
-  const executeSwapIx = buildExecuteSwapIx({
-    authority: vaultPda,
-    vault: vaultPda,
-    inputMint,
-    outputMint,
-    amountIn,
-    minAmountOut,
-    maxIn: amountIn,
-    jupiterInstructions,
-    jupiterAccounts,
-  });
-
-  // 5. Create the final transaction.
+  // 4. Resolve who signs, and prove they are allowed to.
   //
-  // The fee payer must be a key that can actually sign. vaultPda is a program
-  // address with no private key, so a transaction declaring it as payer is
-  // invalid no matter who signs it — the previous code set payerKey to the
-  // PDA and then signed with the server key.
+  // The previous code passed the VAULT PDA as `authority`. A PDA has no
+  // private key, so the transaction could never be fully signed — and even
+  // with a signature the program requires `vault.is_trade_authority(authority)`,
+  // which the vault itself is not. The PDA is the CPI signer INSIDE the
+  // program; the outer signer is the trader.
   const keyResult = tryGetServerKeypair();
   if ("error" in keyResult) {
     throw new Error(`Cannot sign transaction: ${keyResult.error}`);
   }
+  const signer = keyResult.keypair;
 
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
+  const vaultAccount = await fetchVaultAccount(connection, vaultPda);
+  if (!vaultAccount) {
+    throw new Error(`vault ${vaultPda.toBase58()} does not exist on-chain`);
+  }
+  const isTradeAuthority =
+    vaultAccount.data.trader.equals(signer.publicKey) ||
+    (!vaultAccount.data.operator.equals(PublicKey.default) &&
+      vaultAccount.data.operator.equals(signer.publicKey));
+  if (!isTradeAuthority) {
+    throw new Error(
+      `${signer.publicKey.toBase58()} is neither this vault's trader ` +
+        `(${vaultAccount.data.trader.toBase58()}) nor its operator — the program ` +
+        "would reject the swap Unauthorized",
+    );
+  }
 
-  // Price the priority fee against the accounts this route actually touches.
-  // Jupiter reports the compute its route needs; the default 200k limit is
-  // not enough for a multi-hop swap and the transaction would fail on CU
-  // exhaustion rather than on anything to do with the trade.
+  // 5. The two legs, as vault-owned token accounts.
+  //
+  // A buy spends the vault's wSOL float, so it must exist and hold enough.
+  // Nothing created or funded it before — there was no wrap_sol builder at
+  // all — which is why a vault could never have a source account to swap
+  // from. The ATAs themselves are created permissionlessly through the
+  // Associated Token program; the vault program never creates them.
+  const sourceToken = vaultTokenAccount(vaultPda, inputMint);
+  const destToken = vaultTokenAccount(vaultPda, outputMint);
+  const setupIxs: TransactionInstruction[] = [];
+
+  const buyingWithSol = inputMint.equals(WSOL_MINT);
+  if (buyingWithSol) {
+    setupIxs.push(
+      createAssociatedTokenAccountIdempotentInstruction(
+        signer.publicKey,
+        sourceToken,
+        vaultPda,
+        WSOL_MINT,
+      ),
+    );
+    const wsolBalance = await connection
+      .getTokenAccountBalance(sourceToken, "confirmed")
+      .then((r) => BigInt(r.value.amount))
+      .catch(() => 0n);
+    if (wsolBalance < amountIn) {
+      // wrap_sol moves vault SOL into the float. It is gated on the vault's
+      // own free SOL, so this fails cleanly when the vault cannot afford it.
+      setupIxs.push(
+        buildWrapSolIx({
+          authority: signer.publicKey,
+          vault: vaultPda,
+          amountLamports: amountIn - wsolBalance,
+        }).ix,
+      );
+    }
+  }
+  // The receiving side must exist before the swap can pay into it.
+  setupIxs.push(
+    createAssociatedTokenAccountIdempotentInstruction(
+      signer.publicKey,
+      destToken,
+      vaultPda,
+      outputMint,
+    ),
+  );
+
+  // 6. Build the vault program's execute_swap.
+  const minAmountOut = (quote.outAmount * BigInt(10_000 - slippageBps)) / 10_000n;
+  if (minAmountOut <= 0n) {
+    throw new Error("quote produced a zero minimum output; refusing to build the swap");
+  }
+
+  const executeSwapIx = buildExecuteSwapIx({
+    authority: signer.publicKey,
+    vault: vaultPda,
+    sourceToken,
+    destToken,
+    swapInstruction: jupiterIxs.swapInstruction,
+    maxIn: amountIn,
+    minOut: minAmountOut,
+  });
+
+  // 7. Compose, sign and SEND THE TRANSACTION WE BUILT.
+  //
+  // The previous code assembled a correct v0 message with the lookup tables
+  // and compute budget, signed it — and then threw it away, handing a bare
+  // re-wrapped instruction to sendAndConfirm, which builds its own message
+  // with NEITHER. A Jupiter route without its lookup tables does not fit in a
+  // transaction, and without the compute-unit bump it exhausts the default
+  // 200k limit. Whatever was tested, it was not what got sent.
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
   const budgetIxs = await computeBudgetIxs({
-    accountKeys: jupiterAccounts.map((k) => k.toBase58()),
+    accountKeys: jupiterIxs.swapInstruction.accounts.map((a) => a.pubkey),
     computeUnitLimit: jupiterIxs.computeUnitLimit ?? 400_000,
   });
 
   const message = new TransactionMessage({
-    payerKey: keyResult.keypair.publicKey,
+    payerKey: signer.publicKey,
     recentBlockhash: blockhash,
-    instructions: [...budgetIxs, executeSwapIx],
+    instructions: [...budgetIxs, ...setupIxs, executeSwapIx],
   }).compileToV0Message(lookupTables);
 
   const tx = new VersionedTransaction(message);
-  tx.sign([keyResult.keypair]);
+  tx.sign([signer]);
 
-  // 7. Send and confirm
   console.log(`[vault-swap] Sending transaction...`);
-  const result = await sendAndConfirm(
-    [new TransactionInstruction({
-      programId: VAULT_PROGRAM_ID,
-      keys: executeSwapIx.keys,
-      data: executeSwapIx.data,
-    })],
-    [],
-    { label: `execute_swap(${vaultId})` }
+  const signature = await connection.sendTransaction(tx, {
+    skipPreflight: false,
+    maxRetries: 3,
+  });
+  const confirmation = await connection.confirmTransaction(
+    { signature, blockhash, lastValidBlockHeight },
+    "confirmed",
   );
+  if (confirmation.value.err) {
+    throw new Error(
+      `execute_swap failed on chain: ${JSON.stringify(confirmation.value.err)} (${signature})`,
+    );
+  }
+  const txInfo = await connection
+    .getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+    .catch(() => null);
+  const result = { signature, feeLamports: txInfo?.meta?.fee ?? null };
 
   console.log(`[vault-swap] Success: ${result.signature}`);
 

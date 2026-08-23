@@ -64,6 +64,12 @@ export const MIN_PERF_FEE_BPS_AT_INIT = 1_000;
 export const MAX_PERF_FEE_BPS = 3_000;
 export const MIN_NAV_STALENESS_SECONDS = 60;
 export const MAX_NAV_STALENESS_SECONDS = 86_400;
+/** state.rs::MAX_SWAP_EQUITY_BPS — most of equity one swap may move. */
+export const MAX_SWAP_EQUITY_BPS = 500;
+/** state.rs::MAX_DAILY_SWAP_SPEND_BPS — cumulative wSOL spend per UTC day. */
+export const MAX_DAILY_SWAP_SPEND_BPS = 20_000;
+/** state.rs::MIN_SELL_RECOVERY_BPS — floor on a sell against recorded basis. */
+export const MIN_SELL_RECOVERY_BPS = 5_000;
 export const MAX_REDEEM_WINDOW_SECONDS = 30 * 86_400;
 /** state.rs::MIN_REDEEM_WINDOW_SECONDS - a zero window is an instant withdraw. */
 export const MIN_REDEEM_WINDOW_SECONDS = 60 * 60;
@@ -1129,109 +1135,186 @@ export function buildPostNavIx(params: {
 }
 
 /**
- * execute_swap — wraps a Jupiter Router v6 swap.
+ * A Jupiter instruction as `/swap-instructions` returns it.
  *
- * This instruction authorizes a CPI to Jupiter Router v6 with the vault PDA
- * as the signing authority. The vault program enforces:
- *   - All token accounts are vault-owned (authority = vault PDA)
- *   - One leg must be wSOL (vaults are SOL-denominated)
- *   - maxIn/minOut bounds are respected after the CPI
- *   - No third vault ATAs are drained
+ * Accounts carry `isSigner` and `isWritable` exactly as Jupiter computed them,
+ * and BOTH must survive into remaining_accounts: the program copies
+ * `is_writable` verbatim and only re-derives `is_signer` for the vault PDA
+ * (execute_swap.rs, the metas loop). Marking the route read-only — which the
+ * previous builder did — makes the CPI fail on every writable pool account.
+ */
+export interface JupiterInstruction {
+  programId: string;
+  accounts: { pubkey: string; isSigner: boolean; isWritable: boolean }[];
+  /** base64 */
+  data: string;
+}
+
+/**
+ * execute_swap — a Jupiter-v6-pinned swap between two vault-owned token
+ * accounts, signed by the vault PDA inside the program.
  *
- * Accounts (ExecuteSwap, in order from execute_swap.rs):
- *   0  authority     signer (trader or operator)
- *   1  vault         mut
- *   2  jupiter       prog
- *   3  token_program prog
- *   4  system_program prog
- *   5  input_token   mut (vault ATA, authority = vault)
- *   6  output_token  mut (vault ATA, authority = vault)
- *   7  wsol_token    mut (vault wSOL ATA, authority = vault)
- *   8  [additional accounts for Jupiter route]
+ * REWRITTEN. The previous version of this function did not match the deployed
+ * program in any respect and had never executed:
+ *   · it omitted `platform_config` entirely and invented three accounts the
+ *     struct does not have (token_program, system_program, a third wSOL ATA)
+ *     — and that third ATA would have landed in remaining_accounts and been
+ *     rejected outright by the program's third-vault-ATA scan;
+ *   · it encoded `max_in, min_out, vec<instruction>, vec<pubkey>` when the
+ *     program takes `data: Vec<u8>, max_in: u64, min_out: u64`;
+ *   · it read `programIdIndex` / `accountKeyIndexes` off Jupiter's response
+ *     objects, which have neither, so it threw a TypeError before a
+ *     transaction was even built;
+ *   · it marked every route account read-only and non-signer;
+ *   · and its only caller passed the vault PDA as `authority`, which has no
+ *     private key and is not a trade authority anyway.
  *
- * Args: max_in u64, min_out u64, jupiter_instructions (vec), jupiter_accounts (vec)
+ * Accounts (ExecuteSwap, in declaration order):
+ *   0 authority        signer   the vault's trader or operator
+ *   1 vault            mut
+ *   2 platform_config           PDA [PLATFORM_CONFIG_SEED] — the kill switch
+ *   3 jupiter_program           pinned to Jupiter v6
+ *   4 source_token     mut      vault-owned, the leg being spent
+ *   5 dest_token       mut      vault-owned, the leg being received
+ *   6+ remaining_accounts       Jupiter's COMPLETE account list, in order,
+ *                               with its own writability preserved
+ *
+ * Args: data (raw Jupiter instruction bytes), max_in, min_out.
  */
 export function buildExecuteSwapIx(params: {
+  /** must equal the vault's on-chain `trader` or `operator` */
   authority: PublicKey;
   vault: PublicKey;
-  inputMint: PublicKey;
-  outputMint: PublicKey;
-  amountIn: bigint;
-  minAmountOut: bigint;
+  /** the vault-owned token account being SPENT */
+  sourceToken: PublicKey;
+  /** the vault-owned token account being RECEIVED into */
+  destToken: PublicKey;
+  /** Jupiter's swap instruction, verbatim from /swap-instructions */
+  swapInstruction: JupiterInstruction;
   maxIn: bigint;
-  jupiterInstructions: readonly any[];
-  jupiterAccounts: readonly PublicKey[];
+  minOut: bigint;
   programId?: PublicKey;
 }): TransactionInstruction {
   const programId = params.programId ?? VAULT_PROGRAM_ID;
+  if (params.maxIn <= 0n) throw new Error("execute_swap: maxIn must be > 0");
+  if (params.minOut <= 0n) throw new Error("execute_swap: minOut must be > 0");
 
-  // Build the required account keys
-  const keys: any[] = [
+  const jupiterProgram = new PublicKey(params.swapInstruction.programId);
+  if (!jupiterProgram.equals(JUPITER_ROUTER_V6)) {
+    // The program pins this too; failing here says why, with both addresses.
+    throw new Error(
+      `execute_swap: route targets ${jupiterProgram.toBase58()}, but the program ` +
+        `only ever CPIs to Jupiter v6 (${JUPITER_ROUTER_V6.toBase58()})`,
+    );
+  }
+
+  const [platformConfig] = platformConfigPda(programId);
+
+  const keys: AccountMeta[] = [
     { pubkey: params.authority, isSigner: true, isWritable: false },
     { pubkey: params.vault, isSigner: false, isWritable: true },
+    { pubkey: platformConfig, isSigner: false, isWritable: false },
     { pubkey: JUPITER_ROUTER_V6, isSigner: false, isWritable: false },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: params.sourceToken, isSigner: false, isWritable: true },
+    { pubkey: params.destToken, isSigner: false, isWritable: true },
   ];
 
-  // Token accounts will be derived from the vault PDA and mints
-  // The actual ATA addresses should be passed from the caller
-  // For now, we'll add placeholders that need to be filled in
-  const inputToken = getAssociatedTokenAddressSync(
-    params.inputMint,
-    params.vault,
-    true,
-  );
-  const outputToken = getAssociatedTokenAddressSync(
-    params.outputMint,
-    params.vault,
-    true,
-  );
-  const wsolToken = getAssociatedTokenAddressSync(
-    WSOL_MINT,
-    params.vault,
-    true,
-  );
-
-  keys.push(
-    { pubkey: inputToken, isSigner: false, isWritable: true },
-    { pubkey: outputToken, isSigner: false, isWritable: true },
-    { pubkey: wsolToken, isSigner: false, isWritable: true },
-  );
-
-  // Add Jupiter accounts from the route
-  for (const acc of params.jupiterAccounts) {
-    keys.push({ pubkey: acc, isSigner: false, isWritable: false });
+  // Jupiter's account list, verbatim. The vault PDA appears in it as Jupiter's
+  // user-transfer-authority; it is passed with is_signer FALSE because the
+  // outer transaction cannot mark a PDA as a signer — the program flips it on
+  // for the invoke_signed.
+  for (const a of params.swapInstruction.accounts) {
+    const pubkey = new PublicKey(a.pubkey);
+    keys.push({
+      pubkey,
+      isSigner: pubkey.equals(params.vault) ? false : a.isSigner,
+      isWritable: a.isWritable,
+    });
   }
 
-  // Encode the instruction data
-  const writer = new BorshWriter();
-  writer.u64(params.maxIn);
-  writer.u64(params.minAmountOut);
-  
-  // Encode Jupiter instructions as a vec
-  writer.u32(params.jupiterInstructions.length);
-  for (const ix of params.jupiterInstructions) {
-    writer.u8(ix.programIdIndex);
-    writer.u32(ix.accountKeyIndexes.length);
-    for (const idx of ix.accountKeyIndexes) {
-      writer.u8(idx);
-    }
-    writer.u32(ix.data.length);
-    writer.bytes(Buffer.from(ix.data));
-  }
+  const data = Buffer.concat([
+    ixDiscriminator("execute_swap"),
+    // BorshWriter.bytes emits the u32 length prefix a Vec<u8> needs.
+    new BorshWriter()
+      .bytes(Buffer.from(params.swapInstruction.data, "base64"))
+      .u64(params.maxIn)
+      .u64(params.minOut)
+      .toBuffer(),
+  ]);
 
-  // Encode Jupiter accounts as a vec of pubkeys
-  writer.u32(params.jupiterAccounts.length);
-  for (const acc of params.jupiterAccounts) {
-    writer.bytes(acc.toBuffer());
-  }
+  return new TransactionInstruction({ programId, keys, data });
+}
 
-  return new TransactionInstruction({
+/**
+ * wrap_sol — vault SOL into the vault's wSOL account, the trading float.
+ *
+ * Accounts (WrapSol): authority(signer), vault(mut), platform_config,
+ * wsol_account(mut, vault-owned), token_program.
+ * Args: amount_lamports u64.
+ *
+ * The wSOL ATA itself is created permissionlessly through the Associated
+ * Token program — the vault program never creates it — so a caller funding a
+ * vault for the first time must prepend a createAssociatedTokenAccountIdempotent
+ * instruction. There was no builder for this at all, which is why a vault could
+ * never have a source token account to swap from.
+ */
+export function buildWrapSolIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  amountLamports: bigint;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; wsolAccount: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  if (params.amountLamports <= 0n) throw new Error("wrap_sol: amount must be > 0");
+  const [platformConfig] = platformConfigPda(programId);
+  const wsolAccount = getAssociatedTokenAddressSync(WSOL_MINT, params.vault, true);
+  const ix = new TransactionInstruction({
     programId,
-    keys,
-    data: Buffer.concat([ixDiscriminator("execute_swap"), writer.toBuffer()]),
+    keys: [
+      { pubkey: params.authority, isSigner: true, isWritable: false },
+      { pubkey: params.vault, isSigner: false, isWritable: true },
+      { pubkey: platformConfig, isSigner: false, isWritable: false },
+      { pubkey: wsolAccount, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.concat([
+      ixDiscriminator("wrap_sol"),
+      new BorshWriter().u64(params.amountLamports).toBuffer(),
+    ]),
   });
+  return { ix, wsolAccount };
+}
+
+/**
+ * unwrap_sol — close the vault's wSOL account back into vault SOL.
+ *
+ * Accounts (UnwrapSol): authority(signer), vault(mut), wsol_account(mut),
+ * token_program. No args. Deliberately not status-gated in the program:
+ * returning float to the withdrawal buffer must work on a frozen vault too.
+ */
+export function buildUnwrapSolIx(params: {
+  authority: PublicKey;
+  vault: PublicKey;
+  programId?: PublicKey;
+}): { ix: TransactionInstruction; wsolAccount: PublicKey } {
+  const programId = params.programId ?? VAULT_PROGRAM_ID;
+  const wsolAccount = getAssociatedTokenAddressSync(WSOL_MINT, params.vault, true);
+  const ix = new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: params.authority, isSigner: true, isWritable: false },
+      { pubkey: params.vault, isSigner: false, isWritable: true },
+      { pubkey: wsolAccount, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    ],
+    data: ixDiscriminator("unwrap_sol"),
+  });
+  return { ix, wsolAccount };
+}
+
+/** The vault-owned associated token account for a mint. */
+export function vaultTokenAccount(vault: PublicKey, mint: PublicKey): PublicKey {
+  return getAssociatedTokenAddressSync(mint, vault, true);
 }
 
 // ── presentation helpers ───────────────────────────────────────────
